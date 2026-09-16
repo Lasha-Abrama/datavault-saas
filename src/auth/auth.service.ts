@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -19,6 +20,7 @@ import {
 } from '../users/database-errors';
 import { Role } from '../enums/roles.enum';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { CompanyVerificationService } from './company-verification.service';
 
 @Injectable()
 export class AuthService {
@@ -28,6 +30,7 @@ export class AuthService {
     @InjectConnection() private readonly connection: Connection,
     private readonly jwtService: JwtService,
     private readonly subscriptionsService: SubscriptionsService,
+    private readonly companyVerificationService: CompanyVerificationService,
   ) {}
 
   async signIn({ email, password }: SignInDto) {
@@ -43,16 +46,24 @@ export class AuthService {
       throw new UnauthorizedException(
         'No account is registered for this Google identity',
       );
+    const accessToken = await this.signToken(user);
     user.avatar = profile.avatar;
     await user.save();
-    return this.signToken(user);
+    return accessToken;
   }
 
-  async signUp({ email, fullName, password, companyName }: SignUpDto) {
+  async signUp({
+    email,
+    fullName,
+    password,
+    companyName,
+    country,
+    industry,
+  }: SignUpDto) {
     try {
-      const user = await this.connection.transaction(async (session) => {
+      const delivery = await this.connection.transaction(async (session) => {
         const [company] = await this.companyModel.create(
-          [{ name: companyName }],
+          [{ name: companyName, country, industry, activatedAt: null }],
           { session },
         );
         const [owner] = await this.userModel.create(
@@ -68,9 +79,25 @@ export class AuthService {
           { session },
         );
         await this.subscriptionsService.initializeFree(company._id, session);
-        return owner;
+        return this.companyVerificationService.createForRegistration(
+          company._id,
+          owner._id,
+          owner.email,
+          company.name,
+          session,
+        );
       });
-      return { accessToken: await this.signToken(user) };
+      try {
+        await this.companyVerificationService.sendActivationEmail(delivery);
+      } catch {
+        throw new ServiceUnavailableException(
+          'Registration was saved, but the activation email could not be delivered. Please request another activation email.',
+        );
+      }
+      return {
+        message:
+          'Company registered. Check your email to activate the account.',
+      };
     } catch (error) {
       if (isDuplicateKeyError(error)) {
         if (duplicateKeyField(error) === 'email')
@@ -95,6 +122,11 @@ export class AuthService {
       !Object.values(Role).includes(user.role)
     )
       throw new UnauthorizedException('User is not assigned to a company');
+    const company = await this.companyModel.findOne({
+      _id: user.companyId,
+      activatedAt: { $ne: null },
+    });
+    if (!company) throw new UnauthorizedException('Account is not activated');
     return this.jwtService.signAsync({ id: user._id.toString() });
   }
 }

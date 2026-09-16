@@ -1,3 +1,5 @@
+import { isEmail } from 'class-validator';
+
 export function validateEnvironment(config: Record<string, unknown>) {
   const result = { ...config };
   const text = (key: string) =>
@@ -31,6 +33,36 @@ export function validateEnvironment(config: Record<string, unknown>) {
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)
     throw new Error('PORT must be an integer between 1 and 65535');
   result.PORT = Number(port);
+  required('ACCOUNT_ACTIVATION_URL');
+  httpUrl('ACCOUNT_ACTIVATION_URL');
+  const activationUrl = new URL(text('ACCOUNT_ACTIVATION_URL'));
+  if (
+    activationUrl.protocol !== 'https:' &&
+    !['localhost', '127.0.0.1', '[::1]'].includes(activationUrl.hostname)
+  )
+    throw new Error('ACCOUNT_ACTIVATION_URL must use HTTPS outside localhost');
+  required('SMTP_HOST');
+  if (!/^[A-Za-z0-9.:[\]_-]+$/.test(text('SMTP_HOST')))
+    throw new Error('SMTP_HOST must be a valid hostname or IP address');
+  required('SMTP_FROM');
+  if (!isEmail(text('SMTP_FROM')))
+    throw new Error('SMTP_FROM must be a valid email address');
+  const smtpSecure = boolean('SMTP_SECURE', false);
+  const smtpRequireTls = boolean('SMTP_REQUIRE_TLS', true);
+  const smtpPort = text('SMTP_PORT') || (smtpSecure ? '465' : '587');
+  if (
+    !/^\d+$/.test(smtpPort) ||
+    Number(smtpPort) < 1 ||
+    Number(smtpPort) > 65535
+  )
+    throw new Error('SMTP_PORT must be an integer between 1 and 65535');
+  result.SMTP_PORT = Number(smtpPort);
+  result.SMTP_SECURE = smtpSecure;
+  result.SMTP_REQUIRE_TLS = smtpRequireTls;
+  if (text('SMTP_USER') || text('SMTP_PASSWORD')) {
+    required('SMTP_USER');
+    required('SMTP_PASSWORD');
+  }
   if (text('CORS_ORIGIN')) {
     for (const origin of text('CORS_ORIGIN')
       .split(',')
@@ -71,6 +103,14 @@ export function validateEnvironment(config: Record<string, unknown>) {
   }
   if (text('CLOUD_FRONT_URL')) httpUrl('CLOUD_FRONT_URL');
   return result;
+
+  function boolean(key: string, defaultValue: boolean) {
+    const value = text(key).trim().toLowerCase();
+    if (!value) return defaultValue;
+    if (!['true', 'false'].includes(value))
+      throw new Error(`${key} must be true or false`);
+    return value === 'true';
+  }
 }
 
 function validateOrigin(origin: string) {

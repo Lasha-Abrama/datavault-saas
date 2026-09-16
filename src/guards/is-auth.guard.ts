@@ -11,12 +11,14 @@ import { isMongoId } from 'class-validator';
 import { AuthenticatedRequest, TokenPayload } from '../auth/auth.types';
 import { Role } from '../enums/roles.enum';
 import { User } from '../users/entities/user.entity';
+import { Company } from '../companies/entities/company.entity';
 
 @Injectable()
 export class IsAuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
     @InjectModel('user') private readonly userModel: Model<User>,
+    @InjectModel('company') private readonly companyModel: Model<Company>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -34,6 +36,11 @@ export class IsAuthGuard implements CanActivate {
         !Object.values(Role).includes(user.role)
       )
         throw new Error('Invalid user membership');
+      const company = await this.companyModel.findOne({
+        _id: user.companyId,
+        activatedAt: { $ne: null },
+      });
+      if (!company) throw new Error('Inactive company');
       request.auth = {
         id: user._id.toString(),
         companyId: user.companyId.toString(),

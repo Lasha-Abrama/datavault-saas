@@ -12,6 +12,10 @@ import { IsAuthGuard } from '../guards/is-auth.guard';
 import { GoogleOauthGuard } from '../guards/google-oauth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { SubscriptionsDomainModule } from '../subscriptions/subscriptions-domain.module';
+import { EmailModule } from '../email/email.module';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { companyVerificationSchema } from './entities/company-verification.entity';
+import { CompanyVerificationService } from './company-verification.service';
 
 @Module({
   imports: [
@@ -24,10 +28,13 @@ import { SubscriptionsDomainModule } from '../subscriptions/subscriptions-domain
       }),
     }),
     PassportModule.register({ session: false }),
+    ThrottlerModule.forRoot([{ name: 'publicAuth', ttl: 60_000, limit: 10 }]),
+    EmailModule,
     SubscriptionsDomainModule,
     MongooseModule.forFeature([
       { name: 'user', schema: userSchema },
       { name: 'company', schema: companySchema },
+      { name: 'companyVerification', schema: companyVerificationSchema },
     ]),
   ],
   controllers: [AuthController],
@@ -36,6 +43,7 @@ import { SubscriptionsDomainModule } from '../subscriptions/subscriptions-domain
     IsAuthGuard,
     RolesGuard,
     GoogleOauthGuard,
+    CompanyVerificationService,
     {
       provide: GoogleStrategy,
       inject: [ConfigService],

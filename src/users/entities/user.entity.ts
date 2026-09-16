@@ -4,8 +4,8 @@ import { Role } from '../../enums/roles.enum';
 
 @Schema({ timestamps: true })
 export class User {
-  @Prop({ type: String, required: true, trim: true, maxlength: 100 })
-  fullName: string;
+  @Prop({ type: String, trim: true, maxlength: 100 })
+  fullName?: string;
 
   @Prop({
     type: String,

@@ -1,5 +1,14 @@
 process.env.MONGO_URI = 'mongodb://localhost:27017/datavault-test';
 process.env.JWT_SECRET = 'a-secure-test-secret-with-32-characters';
+process.env.ACCOUNT_ACTIVATION_URL =
+  'https://client.example.test/auth/activate';
+process.env.SMTP_HOST = 'smtp.example.test';
+process.env.SMTP_PORT = '587';
+process.env.SMTP_SECURE = 'false';
+process.env.SMTP_REQUIRE_TLS = 'true';
+process.env.SMTP_FROM = 'no-reply@example.test';
+delete process.env.SMTP_USER;
+delete process.env.SMTP_PASSWORD;
 delete process.env.GOOGLE_CLIENT_ID;
 delete process.env.GOOGLE_CLIENT_SECRET;
 delete process.env.GOOGLE_CALLBACK_URL;

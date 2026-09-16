@@ -175,4 +175,16 @@ describe('UsersService tenant boundaries', () => {
     );
     expect(model.findOneAndDelete).not.toHaveBeenCalled();
   });
+
+  it('does not let an owner replace the verified company email through profile updates', async () => {
+    model.findOne.mockResolvedValue({
+      ...memberDocument,
+      role: Role.COMPANY_OWNER,
+      email: 'owner@example.com',
+    });
+    await expect(
+      service.updateUser(owner, ownerId, { email: 'unverified@example.com' }),
+    ).rejects.toThrow('cannot be changed without verification');
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
 });

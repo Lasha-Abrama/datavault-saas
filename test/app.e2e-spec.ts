@@ -9,6 +9,7 @@ import { configureApp } from '../src/config/configure-app';
 import { AppModule } from '../src/app.module';
 import { Role } from '../src/enums/roles.enum';
 import { PlanCode } from '../src/plans/plan.constants';
+import { EmailSender } from '../src/email/email-sender';
 
 describe('multi-tenant HTTP boundary (e2e)', () => {
   let app: INestApplication<App>;
@@ -117,7 +118,12 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .overrideProvider(getModelToken('company'))
       .useValue({
         findById: jest.fn().mockResolvedValue({ _id: companyId, name: 'Acme' }),
+        findOne: jest.fn().mockResolvedValue({ activatedAt: new Date() }),
       })
+      .overrideProvider(getModelToken('companyVerification'))
+      .useValue({})
+      .overrideProvider(EmailSender)
+      .useValue({ send: jest.fn() })
       .overrideProvider(getModelToken('plan'))
       .useValue({ bulkWrite: jest.fn().mockResolvedValue(undefined) })
       .overrideProvider(getModelToken('subscription'))

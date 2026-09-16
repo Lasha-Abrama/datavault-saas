@@ -82,7 +82,15 @@ export class UsersService {
     targetUserId: string,
     dto: UpdateUserDto,
   ) {
-    await this.findOne(actor, targetUserId);
+    const target = await this.findOne(actor, targetUserId);
+    if (
+      dto.email !== undefined &&
+      target.role === Role.COMPANY_OWNER &&
+      dto.email !== target.email
+    )
+      throw new BadRequestException(
+        'The company owner email cannot be changed without verification',
+      );
     const update: UpdateUserDto = {};
     if (dto.email !== undefined) update.email = dto.email;
     if (dto.fullName !== undefined) update.fullName = dto.fullName;

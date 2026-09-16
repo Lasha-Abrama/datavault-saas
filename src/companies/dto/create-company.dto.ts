@@ -1,7 +1,8 @@
 import { Transform } from 'class-transformer';
 import { IsString, Length } from 'class-validator';
+import { CompanyProfileDto } from './company-profile.dto';
 
-export class CreateCompanyDto {
+export class CreateCompanyDto extends CompanyProfileDto {
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )

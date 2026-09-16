@@ -1,90 +1,160 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
 import { Types } from 'mongoose';
 import { AuthService } from './auth.service';
 import { Role } from '../enums/roles.enum';
 
+const registration = {
+  companyName: 'Acme',
+  email: 'owner@example.com',
+  password: 'password',
+  country: 'GE',
+  industry: 'Technology',
+};
+
 describe('AuthService company onboarding', () => {
   const companyId = new Types.ObjectId();
   const userId = new Types.ObjectId();
-  let ownerInput: Record<string, unknown> | undefined;
-  const companyModel = { create: jest.fn() };
-  const userModel = {
-    create: jest.fn((value: unknown) => {
-      ownerInput = (value as Record<string, unknown>[])[0];
-      return Promise.resolve([
-        { _id: userId, companyId, role: Role.COMPANY_OWNER },
-      ]);
-    }),
-    findOne: jest.fn(),
-  };
+  const session = {};
+  const companyModel = { create: jest.fn(), findOne: jest.fn() };
+  const userModel = { create: jest.fn(), findOne: jest.fn() };
   const connection = {
-    transaction: jest.fn<
-      Promise<unknown>,
-      [(session: object) => Promise<unknown>]
-    >((work) => work({})),
+    transaction: jest.fn((work: (value: object) => unknown) => work(session)),
   };
   const jwt = { signAsync: jest.fn().mockResolvedValue('token') };
-  const subscriptionsService = { initializeFree: jest.fn() };
+  const subscriptions = { initializeFree: jest.fn() };
+  const delivery = {
+    email: registration.email,
+    companyName: 'Acme',
+    token: 'raw-token',
+  };
+  const verification = {
+    createForRegistration: jest.fn(),
+    sendActivationEmail: jest.fn(),
+  };
   const service = new AuthService(
     userModel as never,
     companyModel as never,
     connection as never,
     jwt as never,
-    subscriptionsService as never,
+    subscriptions as never,
+    verification as never,
   );
 
-  beforeEach(() => jest.clearAllMocks());
-
-  it('creates one company and its owner in the same transaction', async () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
     companyModel.create.mockResolvedValue([{ _id: companyId, name: 'Acme' }]);
-    await expect(
-      service.signUp({
-        companyName: 'Acme',
-        fullName: 'Owner',
-        email: 'owner@example.com',
-        password: 'password',
-      }),
-    ).resolves.toEqual({ accessToken: 'token' });
-    expect(connection.transaction).toHaveBeenCalledTimes(1);
-    expect(ownerInput).toMatchObject({
+    userModel.create.mockResolvedValue([
+      {
+        _id: userId,
+        companyId,
+        role: Role.COMPANY_OWNER,
+        email: registration.email,
+      },
+    ]);
+    verification.createForRegistration.mockResolvedValue(delivery);
+    verification.sendActivationEmail.mockResolvedValue(undefined);
+    companyModel.findOne.mockResolvedValue({
+      _id: companyId,
+      activatedAt: new Date(),
+    });
+  });
+
+  it('atomically creates a pending company, owner, Free subscription and token without a JWT', async () => {
+    await expect(service.signUp(registration)).resolves.toEqual({
+      message: 'Company registered. Check your email to activate the account.',
+    });
+    expect(companyModel.create).toHaveBeenCalledWith(
+      [
+        {
+          name: 'Acme',
+          country: 'GE',
+          industry: 'Technology',
+          activatedAt: null,
+        },
+      ],
+      { session },
+    );
+    expect(subscriptions.initializeFree).toHaveBeenCalledWith(
+      companyId,
+      session,
+    );
+    expect(verification.createForRegistration).toHaveBeenCalledWith(
+      companyId,
+      userId,
+      registration.email,
+      'Acme',
+      session,
+    );
+    expect(verification.sendActivationEmail).toHaveBeenCalledWith(delivery);
+    expect(
+      verification.sendActivationEmail.mock.invocationCallOrder[0],
+    ).toBeGreaterThan(connection.transaction.mock.invocationCallOrder[0]);
+    expect(jwt.signAsync).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['name', 'Company name is already in use'],
+    ['email', 'Email is already in use'],
+  ])(
+    'reports a duplicate %s and never sends an activation email',
+    async (field, message) => {
+      connection.transaction.mockRejectedValueOnce({
+        code: 11000,
+        keyPattern: { [field]: 1 },
+      } as never);
+      await expect(service.signUp(registration)).rejects.toThrow(message);
+      expect(verification.sendActivationEmail).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a committed registration recoverable when email delivery fails', async () => {
+    verification.sendActivationEmail.mockRejectedValueOnce(
+      new Error('SMTP unavailable'),
+    );
+    await expect(service.signUp(registration)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(subscriptions.initializeFree).toHaveBeenCalledTimes(1);
+    expect(verification.createForRegistration).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects password sign-in before activation even with valid credentials', async () => {
+    const user = {
+      _id: userId,
       companyId,
       role: Role.COMPANY_OWNER,
+      password: await bcrypt.hash('password', 10),
+    };
+    userModel.findOne.mockReturnValue({
+      select: jest.fn().mockResolvedValue(user),
     });
-    expect(subscriptionsService.initializeFree).toHaveBeenCalledWith(
-      companyId,
-      expect.any(Object),
+    companyModel.findOne.mockResolvedValue(null);
+    await expect(service.signIn(registration)).rejects.toThrow(
+      'Account is not activated',
     );
+    expect(jwt.signAsync).not.toHaveBeenCalled();
+  });
+
+  it('issues a token after activation and still verifies the password', async () => {
+    userModel.findOne.mockReturnValue({
+      select: jest.fn().mockResolvedValue({
+        _id: userId,
+        companyId,
+        role: Role.COMPANY_OWNER,
+        password: await bcrypt.hash('password', 10),
+      }),
+    });
+    await expect(service.signIn(registration)).resolves.toEqual({
+      accessToken: 'token',
+    });
     expect(jwt.signAsync).toHaveBeenCalledWith({ id: userId.toString() });
-  });
-
-  it('reports duplicate company names without leaving a user', async () => {
-    connection.transaction.mockRejectedValueOnce({
-      code: 11000,
-      keyPattern: { name: 1 },
-    });
     await expect(
-      service.signUp({
-        companyName: 'Acme',
-        fullName: 'Owner',
-        email: 'owner@example.com',
-        password: 'password',
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('reports duplicate owner emails and rolls back onboarding', async () => {
-    connection.transaction.mockRejectedValueOnce({
-      code: 11000,
-      keyPattern: { email: 1 },
-    });
-    await expect(
-      service.signUp({
-        companyName: 'Another Company',
-        fullName: 'Owner',
-        email: 'existing@example.com',
-        password: 'password',
-      }),
-    ).rejects.toThrow('Email is already in use');
+      service.signIn({ email: registration.email, password: 'incorrect' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('does not create tenantless users during Google sign-in', async () => {
@@ -96,5 +166,41 @@ describe('AuthService company onboarding', () => {
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(userModel.create).not.toHaveBeenCalled();
+  });
+
+  it('does not let Google bypass activation or modify an inactive account', async () => {
+    const user = {
+      _id: userId,
+      companyId,
+      role: Role.COMPANY_OWNER,
+      save: jest.fn(),
+    };
+    userModel.findOne.mockResolvedValue(user);
+    companyModel.findOne.mockResolvedValue(null);
+    await expect(
+      service.signInWithGoogle({
+        email: registration.email,
+        fullName: 'Owner',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(user.save).not.toHaveBeenCalled();
+    expect(jwt.signAsync).not.toHaveBeenCalled();
+  });
+
+  it('allows existing activated accounts to sign in with Google', async () => {
+    const user = {
+      _id: userId,
+      companyId,
+      role: Role.COMPANY_OWNER,
+      save: jest.fn(),
+    };
+    userModel.findOne.mockResolvedValue(user);
+    await expect(
+      service.signInWithGoogle({
+        email: registration.email,
+        fullName: 'Owner',
+      }),
+    ).resolves.toBe('token');
+    expect(user.save).toHaveBeenCalledTimes(1);
   });
 });
