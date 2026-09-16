@@ -8,6 +8,10 @@ import { ClientSession, Connection, Model } from 'mongoose';
 import { Role } from '../enums/roles.enum';
 import { PlansService } from '../plans/plans.service';
 import { User } from '../users/entities/user.entity';
+import {
+  EmployeeInvitation,
+  InvitationStatus,
+} from '../invitations/entities/employee-invitation.entity';
 import { billingPeriod } from './billing-period';
 import { EntitlementDenialReason } from './subscription.constants';
 import { SubscriptionPeriod } from './entities/subscription-period.entity';
@@ -19,26 +23,53 @@ export class EntitlementsService {
     private readonly subscriptionsService: SubscriptionsService,
     private readonly plansService: PlansService,
     @InjectModel('user') private readonly userModel: Model<User>,
+    @InjectModel('employeeInvitation')
+    private readonly invitationModel: Model<EmployeeInvitation>,
     @InjectModel('subscriptionPeriod')
     private readonly periodModel: Model<SubscriptionPeriod>,
     @InjectConnection() private readonly connection: Connection,
   ) {}
 
-  async assertCanAddEmployee(companyId: string, session: ClientSession) {
+  async assertEmployeeCapacity(
+    companyId: string,
+    session: ClientSession,
+    additionalSeats = 1,
+    at = new Date(),
+  ) {
+    if (!Number.isSafeInteger(additionalSeats) || additionalSeats < 0)
+      throw new BadRequestException(
+        'Additional employee seats must be a non-negative integer',
+      );
     const subscription = await this.subscriptionsService.acquireLock(
       companyId,
       session,
     );
     const plan = this.plansService.findOne(subscription.planCode);
-    const employeeCount = await this.userModel.countDocuments(
-      { companyId, role: Role.COMPANY_MEMBER },
-      { session },
-    );
-    if (plan.maxEmployees !== null && employeeCount >= plan.maxEmployees)
+    if (plan.maxEmployees === null) return;
+    const [employeeCount, pendingInvitationCount] = await Promise.all([
+      this.userModel.countDocuments(
+        { companyId, role: Role.COMPANY_MEMBER },
+        { session },
+      ),
+      this.invitationModel.countDocuments(
+        {
+          companyId,
+          status: InvitationStatus.PENDING,
+          expiresAt: { $gt: at },
+        },
+        { session },
+      ),
+    ]);
+    if (
+      employeeCount + pendingInvitationCount + additionalSeats >
+      plan.maxEmployees
+    )
       throw new ForbiddenException({
         message: `The ${plan.name} plan employee limit has been reached`,
         reason: EntitlementDenialReason.EMPLOYEE_LIMIT_REACHED,
         limit: plan.maxEmployees,
+        employees: employeeCount,
+        pendingInvitations: pendingInvitationCount,
       });
   }
 

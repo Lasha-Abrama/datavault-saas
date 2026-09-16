@@ -265,6 +265,8 @@ describe('company registration and activation (e2e)', () => {
       .useValue(subscriptionModel)
       .overrideProvider(getModelToken('subscriptionPeriod'))
       .useValue({ findOne: jest.fn().mockResolvedValue(null) })
+      .overrideProvider(getModelToken('employeeInvitation'))
+      .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
       .overrideProvider(getModelToken('plan'))
       .useValue({ bulkWrite: jest.fn() })
       .overrideProvider(EmailSender)
@@ -274,6 +276,8 @@ describe('company registration and activation (e2e)', () => {
         new ConfigService({
           JWT_SECRET: 'a-secure-test-secret-with-32-characters',
           ACCOUNT_ACTIVATION_URL: 'https://client.example.test/auth/activate',
+          EMPLOYEE_INVITATION_URL:
+            'https://client.example.test/invitations/accept',
           FRONT_URI: 'https://client.example.test',
         }),
       )

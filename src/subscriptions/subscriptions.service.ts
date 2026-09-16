@@ -10,6 +10,10 @@ import { Role } from '../enums/roles.enum';
 import { PlanCode } from '../plans/plan.constants';
 import { PlansService } from '../plans/plans.service';
 import { User } from '../users/entities/user.entity';
+import {
+  EmployeeInvitation,
+  InvitationStatus,
+} from '../invitations/entities/employee-invitation.entity';
 import { billingPeriod } from './billing-period';
 import { SubscriptionPeriod } from './entities/subscription-period.entity';
 import { Subscription } from './entities/subscription.entity';
@@ -22,6 +26,8 @@ export class SubscriptionsService {
     @InjectModel('subscriptionPeriod')
     private readonly periodModel: Model<SubscriptionPeriod>,
     @InjectModel('user') private readonly userModel: Model<User>,
+    @InjectModel('employeeInvitation')
+    private readonly invitationModel: Model<EmployeeInvitation>,
     private readonly plansService: PlansService,
     @InjectConnection() private readonly connection: Connection,
   ) {}
@@ -81,13 +87,26 @@ export class SubscriptionsService {
 
     await this.connection.transaction(async (session) => {
       const subscription = await this.acquireLock(actor.companyId, session);
-      const employeeCount = await this.userModel.countDocuments(
-        { companyId: actor.companyId, role: Role.COMPANY_MEMBER },
-        { session },
-      );
-      if (plan.maxEmployees !== null && employeeCount > plan.maxEmployees)
+      const [employeeCount, pendingInvitationCount] = await Promise.all([
+        this.userModel.countDocuments(
+          { companyId: actor.companyId, role: Role.COMPANY_MEMBER },
+          { session },
+        ),
+        this.invitationModel.countDocuments(
+          {
+            companyId: actor.companyId,
+            status: InvitationStatus.PENDING,
+            expiresAt: { $gt: changedAt },
+          },
+          { session },
+        ),
+      ]);
+      if (
+        plan.maxEmployees !== null &&
+        employeeCount + pendingInvitationCount > plan.maxEmployees
+      )
         throw new ForbiddenException(
-          `The ${plan.name} plan supports at most ${plan.maxEmployees} employees`,
+          `The ${plan.name} plan supports at most ${plan.maxEmployees} employees and pending invitations`,
         );
       if (subscription.planCode === planCode) return;
 

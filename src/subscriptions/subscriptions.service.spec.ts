@@ -22,6 +22,7 @@ describe('SubscriptionsService', () => {
   };
   const periodModel = { findOne: jest.fn() };
   const userModel = { countDocuments: jest.fn() };
+  const invitationModel = { countDocuments: jest.fn() };
   const plansService = {
     findOne: jest.fn((code: PlanCode) => PLAN_CATALOG[code]),
   };
@@ -33,6 +34,7 @@ describe('SubscriptionsService', () => {
     subscriptionModel as never,
     periodModel as never,
     userModel as never,
+    invitationModel as never,
     plansService as never,
     connection as never,
   );
@@ -48,6 +50,7 @@ describe('SubscriptionsService', () => {
     subscriptionModel.findOneAndUpdate.mockResolvedValue(subscription);
     periodModel.findOne.mockResolvedValue(null);
     userModel.countDocuments.mockResolvedValue(2);
+    invitationModel.countDocuments.mockResolvedValue(0);
   });
 
   it('initializes every newly registered company on Free', async () => {
@@ -117,6 +120,14 @@ describe('SubscriptionsService', () => {
       'at most 10 employees',
     );
     expect(subscriptionModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a downgrade when pending invitations exceed its capacity', async () => {
+    userModel.countDocuments.mockResolvedValue(9);
+    invitationModel.countDocuments.mockResolvedValue(2);
+    await expect(service.changePlan(owner, PlanCode.BASIC)).rejects.toThrow(
+      'employees and pending invitations',
+    );
   });
 
   it('changes plans without resetting activation or usage anchors', async () => {

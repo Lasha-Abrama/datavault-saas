@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -39,13 +38,8 @@ describe('UsersService tenant boundaries', () => {
     companyId: new Types.ObjectId(companyId),
     role: Role.COMPANY_MEMBER,
   };
-  let createdInput: Record<string, unknown> | undefined;
   let updatedInput: { password: string } | undefined;
   const model = {
-    create: jest.fn((value: unknown) => {
-      createdInput = (value as Record<string, unknown>[])[0];
-      return Promise.resolve(value);
-    }),
     find: jest.fn(),
     countDocuments: jest.fn(),
     findOne: jest.fn(),
@@ -55,57 +49,9 @@ describe('UsersService tenant boundaries', () => {
     }),
     findOneAndDelete: jest.fn(),
   };
-  const connection = {
-    transaction: jest.fn((work: (session: object) => unknown) => work({})),
-  };
-  const entitlements = { assertCanAddEmployee: jest.fn() };
-  const service = new UsersService(
-    model as never,
-    connection as never,
-    entitlements as never,
-  );
+  const service = new UsersService(model as never);
 
   beforeEach(() => jest.clearAllMocks());
-
-  it('creates members only inside the owner company', async () => {
-    await service.createMember(owner, {
-      fullName: 'Member',
-      email: 'member@example.com',
-      password: 'password',
-    });
-    expect(createdInput).toMatchObject({
-      companyId,
-      role: Role.COMPANY_MEMBER,
-      email: 'member@example.com',
-    });
-    expect(createdInput?.password).not.toBe('password');
-    expect(entitlements.assertCanAddEmployee).toHaveBeenCalledWith(
-      companyId,
-      expect.any(Object),
-    );
-  });
-
-  it('rejects member creation by another member', async () => {
-    await expect(
-      service.createMember(member, {
-        fullName: 'Member',
-        email: 'member@example.com',
-        password: 'password',
-      }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(model.create).not.toHaveBeenCalled();
-  });
-
-  it('maps duplicate member emails to a conflict', async () => {
-    model.create.mockRejectedValue({ code: 11000, keyPattern: { email: 1 } });
-    await expect(
-      service.createMember(owner, {
-        fullName: 'Member',
-        email: 'member@example.com',
-        password: 'password',
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
 
   it('scopes lists and counts to the authenticated company', async () => {
     const query = paginatedQuery([memberDocument]);

@@ -8,6 +8,7 @@ import { CompaniesModule } from './companies/companies.module';
 import { validateEnvironment } from './config/environment';
 import { PlansModule } from './plans/plans.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { InvitationsModule } from './invitations/invitations.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     CompaniesModule,
     PlansModule,
     SubscriptionsModule,
+    InvitationsModule,
   ],
 })
 export class AppModule {}

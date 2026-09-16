@@ -35,12 +35,10 @@ export function validateEnvironment(config: Record<string, unknown>) {
   result.PORT = Number(port);
   required('ACCOUNT_ACTIVATION_URL');
   httpUrl('ACCOUNT_ACTIVATION_URL');
-  const activationUrl = new URL(text('ACCOUNT_ACTIVATION_URL'));
-  if (
-    activationUrl.protocol !== 'https:' &&
-    !['localhost', '127.0.0.1', '[::1]'].includes(activationUrl.hostname)
-  )
-    throw new Error('ACCOUNT_ACTIVATION_URL must use HTTPS outside localhost');
+  requireHttpsOutsideLocalhost('ACCOUNT_ACTIVATION_URL');
+  required('EMPLOYEE_INVITATION_URL');
+  httpUrl('EMPLOYEE_INVITATION_URL');
+  requireHttpsOutsideLocalhost('EMPLOYEE_INVITATION_URL');
   required('SMTP_HOST');
   if (!/^[A-Za-z0-9.:[\]_-]+$/.test(text('SMTP_HOST')))
     throw new Error('SMTP_HOST must be a valid hostname or IP address');
@@ -110,6 +108,15 @@ export function validateEnvironment(config: Record<string, unknown>) {
     if (!['true', 'false'].includes(value))
       throw new Error(`${key} must be true or false`);
     return value === 'true';
+  }
+
+  function requireHttpsOutsideLocalhost(key: string) {
+    const url = new URL(text(key));
+    if (
+      url.protocol !== 'https:' &&
+      !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    )
+      throw new Error(`${key} must use HTTPS outside localhost`);
   }
 }
 

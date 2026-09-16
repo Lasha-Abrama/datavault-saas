@@ -2,6 +2,8 @@ process.env.MONGO_URI = 'mongodb://localhost:27017/datavault-test';
 process.env.JWT_SECRET = 'a-secure-test-secret-with-32-characters';
 process.env.ACCOUNT_ACTIVATION_URL =
   'https://client.example.test/auth/activate';
+process.env.EMPLOYEE_INVITATION_URL =
+  'https://client.example.test/invitations/accept';
 process.env.SMTP_HOST = 'smtp.example.test';
 process.env.SMTP_PORT = '587';
 process.env.SMTP_SECURE = 'false';

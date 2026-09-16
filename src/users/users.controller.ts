@@ -5,7 +5,6 @@ import {
   Get,
   Param,
   Patch,
-  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -13,7 +12,6 @@ import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryParams } from './dto/query-params.dto';
 import { IsValidMongoDBId } from './dto/is-valid-objectID.dto';
-import { CreateMemberDto } from './dto/create-member.dto';
 import { IsAuthGuard } from '../guards/is-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -25,12 +23,6 @@ import { Role } from '../enums/roles.enum';
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
-
-  @Post()
-  @Roles(Role.COMPANY_OWNER)
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateMemberDto) {
-    return this.usersService.createMember(user, dto);
-  }
 
   @Get()
   @Roles(Role.COMPANY_OWNER)

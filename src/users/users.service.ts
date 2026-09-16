@@ -5,54 +5,19 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model } from 'mongoose';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { User } from './entities/user.entity';
 import { QueryParams } from './dto/query-params.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { CreateMemberDto } from './dto/create-member.dto';
 import { Role } from '../enums/roles.enum';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { isDuplicateKeyError } from './database-errors';
-import { EntitlementsService } from '../subscriptions/entitlements.service';
 
 @Injectable()
 export class UsersService {
-  constructor(
-    @InjectModel('user') private readonly userModel: Model<User>,
-    @InjectConnection() private readonly connection: Connection,
-    private readonly entitlementsService: EntitlementsService,
-  ) {}
-
-  async createMember(actor: AuthenticatedUser, dto: CreateMemberDto) {
-    this.requireOwner(actor);
-    try {
-      const password = await bcrypt.hash(dto.password, 10);
-      return await this.connection.transaction(async (session) => {
-        await this.entitlementsService.assertCanAddEmployee(
-          actor.companyId,
-          session,
-        );
-        const [user] = await this.userModel.create(
-          [
-            {
-              ...dto,
-              password,
-              companyId: actor.companyId,
-              role: Role.COMPANY_MEMBER,
-            },
-          ],
-          { session },
-        );
-        return user;
-      });
-    } catch (error) {
-      if (isDuplicateKeyError(error))
-        throw new ConflictException('Email is already in use');
-      throw error;
-    }
-  }
+  constructor(@InjectModel('user') private readonly userModel: Model<User>) {}
 
   async findAll(actor: AuthenticatedUser, { page, take }: QueryParams) {
     this.requireOwner(actor);

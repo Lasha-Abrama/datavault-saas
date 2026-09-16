@@ -15,6 +15,7 @@ describe('EntitlementsService', () => {
     findOne: jest.fn((code: PlanCode) => PLAN_CATALOG[code]),
   };
   const userModel = { countDocuments: jest.fn() };
+  const invitationModel = { countDocuments: jest.fn() };
   const periodModel = {
     findOne: jest.fn(),
     findOneAndUpdate: jest.fn(),
@@ -26,6 +27,7 @@ describe('EntitlementsService', () => {
     subscriptionsService as never,
     plansService as never,
     userModel as never,
+    invitationModel as never,
     periodModel as never,
     connection as never,
   );
@@ -41,13 +43,14 @@ describe('EntitlementsService', () => {
       activatedAt,
     });
     userModel.countDocuments.mockResolvedValue(0);
+    invitationModel.countDocuments.mockResolvedValue(0);
     periodModel.findOne.mockResolvedValue(null);
     periodModel.findOneAndUpdate.mockResolvedValue({ uploadedFiles: 1 });
   });
 
   it('reserves Free for the owner and permits no employees', async () => {
     try {
-      await service.assertCanAddEmployee(companyId, session as never);
+      await service.assertEmployeeCapacity(companyId, session as never);
       throw new Error('Expected employee limit rejection');
     } catch (error) {
       expect(error).toBeInstanceOf(ForbiddenException);
@@ -65,11 +68,11 @@ describe('EntitlementsService', () => {
     });
     userModel.countDocuments.mockResolvedValueOnce(9);
     await expect(
-      service.assertCanAddEmployee(companyId, session as never),
+      service.assertEmployeeCapacity(companyId, session as never),
     ).resolves.toBeUndefined();
     userModel.countDocuments.mockResolvedValueOnce(10);
     await expect(
-      service.assertCanAddEmployee(companyId, session as never),
+      service.assertEmployeeCapacity(companyId, session as never),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -80,7 +83,22 @@ describe('EntitlementsService', () => {
     });
     userModel.countDocuments.mockResolvedValue(10000);
     await expect(
-      service.assertCanAddEmployee(companyId, session as never),
+      service.assertEmployeeCapacity(companyId, session as never),
+    ).resolves.toBeUndefined();
+  });
+
+  it('reserves Basic seats for unexpired pending invitations', async () => {
+    subscriptionsService.acquireLock.mockResolvedValue({
+      planCode: PlanCode.BASIC,
+      activatedAt,
+    });
+    userModel.countDocuments.mockResolvedValue(8);
+    invitationModel.countDocuments.mockResolvedValue(2);
+    await expect(
+      service.assertEmployeeCapacity(companyId, session as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.assertEmployeeCapacity(companyId, session as never, 0),
     ).resolves.toBeUndefined();
   });
 

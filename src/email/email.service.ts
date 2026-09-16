@@ -27,4 +27,23 @@ export class EmailService {
       ].join('\n'),
     });
   }
+
+  async sendEmployeeInvitation(to: string, companyName: string, token: string) {
+    const invitationUrl = new URL(
+      this.config.getOrThrow<string>('EMPLOYEE_INVITATION_URL'),
+    );
+    invitationUrl.searchParams.set('token', token);
+    await this.sender.send({
+      to,
+      subject: `Join ${companyName} on DataVault`,
+      text: [
+        `${companyName} invited you to join its DataVault account.`,
+        '',
+        'Accept the invitation within 72 hours:',
+        invitationUrl.toString(),
+        '',
+        'If you were not expecting this invitation, you can ignore this email.',
+      ].join('\n'),
+    });
+  }
 }

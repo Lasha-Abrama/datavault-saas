@@ -133,6 +133,8 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
         findOne: jest.fn().mockResolvedValue(null),
         findOneAndUpdate: jest.fn(),
       })
+      .overrideProvider(getModelToken('employeeInvitation'))
+      .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
       .compile();
     app = moduleFixture.createNestApplication();
     configureApp(app);
@@ -192,7 +194,7 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .set('Authorization', `Bearer ${memberToken}`)
       .expect(403));
 
-  it('denies a member from creating users', () =>
+  it('has no direct member-creation endpoint', () =>
     request(app.getHttpServer())
       .post('/users')
       .set('Authorization', `Bearer ${memberToken}`)
@@ -201,9 +203,9 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
         password: 'password',
         fullName: 'New User',
       })
-      .expect(403));
+      .expect(404));
 
-  it('rejects an owner attempt to select a new user role', () =>
+  it('does not let owners bypass invitations through the old endpoint', () =>
     request(app.getHttpServer())
       .post('/users')
       .set('Authorization', `Bearer ${ownerToken}`)
@@ -213,7 +215,7 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
         fullName: 'New User',
         role: Role.COMPANY_OWNER,
       })
-      .expect(400));
+      .expect(404));
 
   it('does not reveal a user outside the owner company', () =>
     request(app.getHttpServer())

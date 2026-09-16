@@ -4,6 +4,7 @@ const valid = {
   MONGO_URI: 'mongodb://localhost:27017/datavault',
   JWT_SECRET: 'a-secure-test-secret-with-32-characters',
   ACCOUNT_ACTIVATION_URL: 'https://client.test/auth/activate',
+  EMPLOYEE_INVITATION_URL: 'https://client.test/invitations/accept',
   SMTP_HOST: 'smtp.example.test',
   SMTP_FROM: 'no-reply@example.test',
 };
@@ -26,6 +27,10 @@ describe('validateEnvironment', () => {
     [
       { ...valid, ACCOUNT_ACTIVATION_URL: 'http://client.test' },
       'ACCOUNT_ACTIVATION_URL',
+    ],
+    [
+      { ...valid, EMPLOYEE_INVITATION_URL: 'http://client.test' },
+      'EMPLOYEE_INVITATION_URL',
     ],
   ])('rejects an invalid configuration', (config, key) => {
     expect(() => validateEnvironment(config)).toThrow(key);
