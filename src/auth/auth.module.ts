@@ -11,6 +11,7 @@ import { companySchema } from '../companies/entities/company.entity';
 import { IsAuthGuard } from '../guards/is-auth.guard';
 import { GoogleOauthGuard } from '../guards/google-oauth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { SubscriptionsDomainModule } from '../subscriptions/subscriptions-domain.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
       }),
     }),
     PassportModule.register({ session: false }),
+    SubscriptionsDomainModule,
     MongooseModule.forFeature([
       { name: 'user', schema: userSchema },
       { name: 'company', schema: companySchema },

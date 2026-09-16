@@ -18,6 +18,7 @@ import {
   isDuplicateKeyError,
 } from '../users/database-errors';
 import { Role } from '../enums/roles.enum';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class AuthService {
@@ -26,6 +27,7 @@ export class AuthService {
     @InjectModel('company') private readonly companyModel: Model<Company>,
     @InjectConnection() private readonly connection: Connection,
     private readonly jwtService: JwtService,
+    private readonly subscriptionsService: SubscriptionsService,
   ) {}
 
   async signIn({ email, password }: SignInDto) {
@@ -65,6 +67,7 @@ export class AuthService {
           ],
           { session },
         );
+        await this.subscriptionsService.initializeFree(company._id, session);
         return owner;
       });
       return { accessToken: await this.signToken(user) };

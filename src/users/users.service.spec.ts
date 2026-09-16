@@ -43,7 +43,7 @@ describe('UsersService tenant boundaries', () => {
   let updatedInput: { password: string } | undefined;
   const model = {
     create: jest.fn((value: unknown) => {
-      createdInput = value as Record<string, unknown>;
+      createdInput = (value as Record<string, unknown>[])[0];
       return Promise.resolve(value);
     }),
     find: jest.fn(),
@@ -55,7 +55,15 @@ describe('UsersService tenant boundaries', () => {
     }),
     findOneAndDelete: jest.fn(),
   };
-  const service = new UsersService(model as never);
+  const connection = {
+    transaction: jest.fn((work: (session: object) => unknown) => work({})),
+  };
+  const entitlements = { assertCanAddEmployee: jest.fn() };
+  const service = new UsersService(
+    model as never,
+    connection as never,
+    entitlements as never,
+  );
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -71,6 +79,10 @@ describe('UsersService tenant boundaries', () => {
       email: 'member@example.com',
     });
     expect(createdInput?.password).not.toBe('password');
+    expect(entitlements.assertCanAddEmployee).toHaveBeenCalledWith(
+      companyId,
+      expect.any(Object),
+    );
   });
 
   it('rejects member creation by another member', async () => {

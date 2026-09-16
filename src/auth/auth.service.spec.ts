@@ -24,11 +24,13 @@ describe('AuthService company onboarding', () => {
     >((work) => work({})),
   };
   const jwt = { signAsync: jest.fn().mockResolvedValue('token') };
+  const subscriptionsService = { initializeFree: jest.fn() };
   const service = new AuthService(
     userModel as never,
     companyModel as never,
     connection as never,
     jwt as never,
+    subscriptionsService as never,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -48,6 +50,10 @@ describe('AuthService company onboarding', () => {
       companyId,
       role: Role.COMPANY_OWNER,
     });
+    expect(subscriptionsService.initializeFree).toHaveBeenCalledWith(
+      companyId,
+      expect.any(Object),
+    );
     expect(jwt.signAsync).toHaveBeenCalledWith({ id: userId.toString() });
   });
 

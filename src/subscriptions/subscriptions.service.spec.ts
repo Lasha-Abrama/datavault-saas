@@ -1,0 +1,149 @@
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Types } from 'mongoose';
+import { AuthenticatedUser } from '../common/types/authenticated-user';
+import { Role } from '../enums/roles.enum';
+import { PLAN_CATALOG, PlanCode } from '../plans/plan.constants';
+import { SubscriptionsService } from './subscriptions.service';
+
+describe('SubscriptionsService', () => {
+  const companyId = new Types.ObjectId();
+  const activatedAt = new Date('2026-01-15T12:00:00.000Z');
+  const subscription = {
+    _id: new Types.ObjectId(),
+    companyId,
+    planCode: PlanCode.BASIC,
+    activatedAt,
+    planChangedAt: activatedAt,
+  };
+  const subscriptionModel = {
+    create: jest.fn(),
+    findOne: jest.fn(),
+    findOneAndUpdate: jest.fn(),
+  };
+  const periodModel = { findOne: jest.fn() };
+  const userModel = { countDocuments: jest.fn() };
+  const plansService = {
+    findOne: jest.fn((code: PlanCode) => PLAN_CATALOG[code]),
+  };
+  const session = {};
+  const connection = {
+    transaction: jest.fn((work: (value: object) => unknown) => work(session)),
+  };
+  const service = new SubscriptionsService(
+    subscriptionModel as never,
+    periodModel as never,
+    userModel as never,
+    plansService as never,
+    connection as never,
+  );
+  const owner: AuthenticatedUser = {
+    id: new Types.ObjectId().toString(),
+    companyId: companyId.toString(),
+    role: Role.COMPANY_OWNER,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    subscriptionModel.findOne.mockResolvedValue(subscription);
+    subscriptionModel.findOneAndUpdate.mockResolvedValue(subscription);
+    periodModel.findOne.mockResolvedValue(null);
+    userModel.countDocuments.mockResolvedValue(2);
+  });
+
+  it('initializes every newly registered company on Free', async () => {
+    subscriptionModel.create.mockResolvedValue([subscription]);
+    await service.initializeFree(companyId, session as never, activatedAt);
+    expect(subscriptionModel.create).toHaveBeenCalledWith(
+      [
+        {
+          companyId,
+          planCode: PlanCode.FREE,
+          activatedAt,
+          planChangedAt: activatedAt,
+        },
+      ],
+      { session },
+    );
+  });
+
+  it('returns only the requested company state and its monthly estimate', async () => {
+    await expect(
+      service.getCurrent(
+        companyId.toString(),
+        new Date('2026-02-16T00:00:00.000Z'),
+      ),
+    ).resolves.toMatchObject({
+      companyId,
+      plan: { code: PlanCode.BASIC },
+      employeeCount: 2,
+      monthlyPriceEstimateCents: 1000,
+      billingPeriod: {
+        startsAt: new Date('2026-02-15T12:00:00.000Z'),
+        uploadedFiles: 0,
+        fileOverageCents: 0,
+      },
+    });
+    expect(subscriptionModel.findOne).toHaveBeenCalledWith(
+      { companyId: companyId.toString() },
+      null,
+      undefined,
+    );
+    expect(periodModel.findOne).toHaveBeenCalledWith({
+      companyId: companyId.toString(),
+      startsAt: new Date('2026-02-15T12:00:00.000Z'),
+    });
+  });
+
+  it('fails closed when a company has no subscription', async () => {
+    subscriptionModel.findOne.mockResolvedValue(null);
+    await expect(
+      service.getCurrent(companyId.toString()),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('allows only owners to change a plan at the service boundary', async () => {
+    await expect(
+      service.changePlan(
+        { ...owner, role: Role.COMPANY_MEMBER },
+        PlanCode.PREMIUM,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(connection.transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a downgrade that cannot hold the existing employees', async () => {
+    userModel.countDocuments.mockResolvedValue(11);
+    await expect(service.changePlan(owner, PlanCode.BASIC)).rejects.toThrow(
+      'at most 10 employees',
+    );
+    expect(subscriptionModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('changes plans without resetting activation or usage anchors', async () => {
+    subscriptionModel.findOneAndUpdate
+      .mockResolvedValueOnce(subscription)
+      .mockResolvedValueOnce({ ...subscription, planCode: PlanCode.PREMIUM });
+    subscriptionModel.findOne.mockResolvedValue({
+      ...subscription,
+      planCode: PlanCode.PREMIUM,
+    });
+    await service.changePlan(owner, PlanCode.PREMIUM);
+    const updateCall = subscriptionModel.findOneAndUpdate.mock
+      .calls[1] as unknown as [
+      Record<string, unknown>,
+      { $set: { planCode: PlanCode; planChangedAt: Date } },
+      Record<string, unknown>,
+    ];
+    expect(updateCall[0]).toEqual({
+      _id: subscription._id,
+      companyId: owner.companyId,
+    });
+    expect(updateCall[1].$set.planCode).toBe(PlanCode.PREMIUM);
+    expect(updateCall[1].$set.planChangedAt).toBeInstanceOf(Date);
+    expect(updateCall[2]).toEqual({
+      new: true,
+      runValidators: true,
+      session,
+    });
+  });
+});

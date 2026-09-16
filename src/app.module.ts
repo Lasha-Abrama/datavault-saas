@@ -6,6 +6,8 @@ import { AuthModule } from './auth/auth.module';
 import { AwsS3Module } from './aws-s3/aws-s3.module';
 import { CompaniesModule } from './companies/companies.module';
 import { validateEnvironment } from './config/environment';
+import { PlansModule } from './plans/plans.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { validateEnvironment } from './config/environment';
     AuthModule,
     AwsS3Module,
     CompaniesModule,
+    PlansModule,
+    SubscriptionsModule,
   ],
 })
 export class AppModule {}
