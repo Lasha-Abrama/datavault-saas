@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { AwsS3Module } from './aws-s3/aws-s3.module';
+import { CompaniesModule } from './companies/companies.module';
 import { validateEnvironment } from './config/environment';
 
 @Module({
@@ -18,6 +19,7 @@ import { validateEnvironment } from './config/environment';
     UsersModule,
     AuthModule,
     AwsS3Module,
+    CompaniesModule,
   ],
 })
 export class AppModule {}

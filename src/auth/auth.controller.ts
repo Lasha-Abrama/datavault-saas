@@ -15,7 +15,8 @@ import { SignInDto } from './dto/sign-in.dto';
 import { SignUpDto } from './dto/sign-up.dto';
 import { GoogleOauthGuard } from '../guards/google-oauth.guard';
 import { IsAuthGuard } from '../guards/is-auth.guard';
-import { UserId } from '../decorators/user.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../common/types/authenticated-user';
 
 @Controller('auth')
 export class AuthController {
@@ -60,7 +61,7 @@ export class AuthController {
 
   @Get('current-user')
   @UseGuards(IsAuthGuard)
-  currentUser(@UserId() userId: string) {
-    return this.authService.getCurrentUser(userId);
+  currentUser(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.getCurrentUser(user.id);
   }
 }

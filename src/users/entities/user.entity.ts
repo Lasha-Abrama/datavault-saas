@@ -1,9 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Types } from 'mongoose';
 import { Role } from '../../enums/roles.enum';
 
 @Schema({ timestamps: true })
 export class User {
-  @Prop({ type: String })
+  @Prop({ type: String, required: true, trim: true, maxlength: 100 })
   fullName: string;
 
   @Prop({
@@ -18,7 +19,16 @@ export class User {
   @Prop({ type: String, select: false })
   password?: string;
 
-  @Prop({ type: String, enum: Role, default: Role.STUDENT })
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'company',
+    required: true,
+    immutable: true,
+    index: true,
+  })
+  companyId: Types.ObjectId;
+
+  @Prop({ type: String, enum: Role, default: Role.COMPANY_MEMBER })
   role: Role;
 
   @Prop({ type: String })
@@ -26,7 +36,7 @@ export class User {
 }
 
 export const userSchema = SchemaFactory.createForClass(User);
-// select:false protects reads; transforms also protect newly saved documents.
+userSchema.index({ companyId: 1, role: 1 });
 userSchema.set('toJSON', {
   transform: (_doc, ret) => {
     delete ret.password;

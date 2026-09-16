@@ -7,9 +7,10 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { PassportModule } from '@nestjs/passport';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { userSchema } from '../users/entities/user.entity';
+import { companySchema } from '../companies/entities/company.entity';
 import { IsAuthGuard } from '../guards/is-auth.guard';
-import { IsAdminGuard } from '../guards/is-admin.guard';
 import { GoogleOauthGuard } from '../guards/google-oauth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @Module({
   imports: [
@@ -22,13 +23,16 @@ import { GoogleOauthGuard } from '../guards/google-oauth.guard';
       }),
     }),
     PassportModule.register({ session: false }),
-    MongooseModule.forFeature([{ name: 'user', schema: userSchema }]),
+    MongooseModule.forFeature([
+      { name: 'user', schema: userSchema },
+      { name: 'company', schema: companySchema },
+    ]),
   ],
   controllers: [AuthController],
   providers: [
     AuthService,
     IsAuthGuard,
-    IsAdminGuard,
+    RolesGuard,
     GoogleOauthGuard,
     {
       provide: GoogleStrategy,
@@ -39,6 +43,6 @@ import { GoogleOauthGuard } from '../guards/google-oauth.guard';
           : null,
     },
   ],
-  exports: [IsAuthGuard, IsAdminGuard, JwtModule],
+  exports: [IsAuthGuard, RolesGuard, JwtModule, MongooseModule],
 })
 export class AuthModule {}

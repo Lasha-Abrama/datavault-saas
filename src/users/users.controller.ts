@@ -1,10 +1,11 @@
 import {
-  Controller,
-  Get,
   Body,
-  Patch,
-  Param,
+  Controller,
   Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -12,37 +13,53 @@ import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryParams } from './dto/query-params.dto';
 import { IsValidMongoDBId } from './dto/is-valid-objectID.dto';
+import { CreateMemberDto } from './dto/create-member.dto';
 import { IsAuthGuard } from '../guards/is-auth.guard';
-import { IsAdminGuard } from '../guards/is-admin.guard';
-import { UserId } from '../decorators/user.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../common/types/authenticated-user';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Role } from '../enums/roles.enum';
 
-@UseGuards(IsAuthGuard)
+@UseGuards(IsAuthGuard, RolesGuard)
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @UseGuards(IsAdminGuard)
+  @Post()
+  @Roles(Role.COMPANY_OWNER)
+  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateMemberDto) {
+    return this.usersService.createMember(user, dto);
+  }
+
   @Get()
-  findAll(@Query() { page, take }: QueryParams) {
-    return this.usersService.findAll({ page, take });
+  @Roles(Role.COMPANY_OWNER)
+  findAll(@CurrentUser() user: AuthenticatedUser, @Query() query: QueryParams) {
+    return this.usersService.findAll(user, query);
   }
 
   @Get(':id')
-  findOne(@UserId() requesterId: string, @Param() { id }: IsValidMongoDBId) {
-    return this.usersService.findOneForRequester(requesterId, id);
+  findOne(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() { id }: IsValidMongoDBId,
+  ) {
+    return this.usersService.findOne(user, id);
   }
 
   @Patch(':id')
   update(
-    @UserId() requesterId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Param() { id }: IsValidMongoDBId,
-    @Body() updateUserDto: UpdateUserDto,
+    @Body() dto: UpdateUserDto,
   ) {
-    return this.usersService.updateUser(requesterId, id, updateUserDto);
+    return this.usersService.updateUser(user, id, dto);
   }
 
   @Delete(':id')
-  remove(@UserId() requesterId: string, @Param() { id }: IsValidMongoDBId) {
-    return this.usersService.deleteUser(requesterId, id);
+  remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() { id }: IsValidMongoDBId,
+  ) {
+    return this.usersService.deleteUser(user, id);
   }
 }

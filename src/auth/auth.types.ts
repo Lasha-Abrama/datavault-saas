@@ -1,14 +1,12 @@
 import { Request } from 'express';
-import { Role } from '../enums/roles.enum';
+import { AuthenticatedUser } from '../common/types/authenticated-user';
 
 export interface AuthenticatedRequest extends Request {
-  userId?: string;
-  role?: Role;
+  auth?: AuthenticatedUser;
 }
 
 export interface TokenPayload {
   id: string;
-  role: Role;
 }
 
 export interface GoogleUser {
