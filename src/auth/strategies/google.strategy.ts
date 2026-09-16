@@ -1,22 +1,38 @@
-import { PassportStrategy } from "@nestjs/passport";
-import { Strategy } from "passport-google-oauth2";
+import { PassportStrategy } from '@nestjs/passport';
+import { ConfigService } from '@nestjs/config';
+import { UnauthorizedException } from '@nestjs/common';
+import { Strategy } from 'passport-google-oauth2';
+import { GoogleUser } from '../auth.types';
 
-export class GoogleStrategy extends PassportStrategy(Strategy, 'google'){
-    constructor(){
-        super({
-            clientID: process.env.GOOGLE_CLIENT_ID!,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-            callbackURL: process.env.GOOGLE_CALLBACK_URL!,
-            scope: ['email', 'profile']
-        })
-    }
+interface GoogleProfile {
+  email?: string;
+  email_verified?: boolean;
+  displayName: string;
+  picture?: string;
+}
 
-    async validate(accessToken, refreshToken, profile, done) {
-        const data = {
-            email: profile.email,
-            fullName: profile.displayName,
-            avatar: profile.picture
-        }
-        done(null, data)
-    }
+export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
+  constructor(config: ConfigService) {
+    super({
+      clientID: config.getOrThrow<string>('GOOGLE_CLIENT_ID'),
+      clientSecret: config.getOrThrow<string>('GOOGLE_CLIENT_SECRET'),
+      callbackURL: config.getOrThrow<string>('GOOGLE_CALLBACK_URL'),
+      scope: ['email', 'profile'],
+    });
+  }
+
+  validate(
+    _accessToken: string,
+    _refreshToken: string,
+    profile: GoogleProfile,
+  ): GoogleUser {
+    const email = profile.email_verified === true ? profile.email : undefined;
+    if (!email)
+      throw new UnauthorizedException('Google did not supply a verified email');
+    return {
+      email: email.toLowerCase(),
+      fullName: profile.displayName,
+      avatar: profile.picture,
+    };
+  }
 }

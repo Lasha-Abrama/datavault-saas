@@ -1,59 +1,87 @@
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  DeleteObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+
+interface UploadFile {
+  buffer: Buffer;
+  mimetype: string;
+}
 
 @Injectable()
 export class AwsS3Service {
-    private storageService;
-    private bucketName
+  private readonly storageService: S3Client;
+  private readonly bucketName?: string;
+  private readonly logger = new Logger(AwsS3Service.name);
 
-
-    constructor(){
-        this.bucketName = process.env.AWS_BUCKET_NAME
-        this.storageService = new S3Client({
+  constructor(private readonly config: ConfigService) {
+    this.bucketName = config.get<string>('AWS_BUCKET_NAME');
+    const accessKeyId = config.get<string>('AWS_ACCESS_KEY_ID');
+    this.storageService = new S3Client({
+      region: config.get<string>('AWS_REGION'),
+      // Use IAM roles/default credential chain when no explicit credentials are supplied.
+      ...(accessKeyId
+        ? {
             credentials: {
-                accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+              accessKeyId,
+              secretAccessKey: config.getOrThrow<string>(
+                'AWS_SECRET_ACCESS_KEY',
+              ),
+              sessionToken:
+                config.get<string>('AWS_SESSION_TOKEN') || undefined,
             },
-            region: process.env.AWS_REGION
-        })
+          }
+        : {}),
+    });
+  }
+
+  async uploadImage(filePath: string, file: UploadFile) {
+    if (!filePath || !file?.buffer || !file.mimetype)
+      throw new BadRequestException('File is required');
+    this.requireStorage();
+    try {
+      await this.storageService.send(
+        new PutObjectCommand({
+          Key: filePath,
+          Bucket: this.bucketName,
+          Body: file.buffer,
+          ContentType: file.mimetype,
+        }),
+      );
+      return filePath;
+    } catch {
+      this.logger.error('S3 upload failed');
+      throw new ServiceUnavailableException('Could not upload file');
     }
+  }
 
+  getFile(filePath: string) {
+    if (!filePath) throw new BadRequestException('File path is required');
+    const baseUrl = this.config.get<string>('CLOUD_FRONT_URL');
+    if (!baseUrl)
+      throw new ServiceUnavailableException('CloudFront URL is not configured');
+    return `${baseUrl.replace(/\/$/, '')}/${filePath.split('/').map(encodeURIComponent).join('/')}`;
+  }
 
-    async uploadImage(filePath: string, file){
-        if(!filePath || !file) throw new BadRequestException('File is required')
-        try{
-            const config = {
-                Key: filePath,
-                Bucket: this.bucketName,
-                Body: file.buffer,
-                ContentType: file.mimetype,
-            }
-            const uploadCommand = new PutObjectCommand(config)
-            await this.storageService.send(uploadCommand)
-            return filePath
-        }catch(e){
-            console.log(e, "eent")
-            throw new BadRequestException('Could not upload file')
-        }
-    }
+  async deleteImg(filePath: string) {
+    if (!filePath) throw new BadRequestException('File path is required');
+    this.requireStorage();
+    await this.storageService.send(
+      new DeleteObjectCommand({ Bucket: this.bucketName, Key: filePath }),
+    );
+    return 'deleted successfully';
+  }
 
-
-    async getFile(filePath: string){
-        if(!filePath) throw new BadRequestException('File path is required')
-        return `${process.env.CLOUD_FRONT_URL}/${filePath}`
-    }
-
-
-    async deleteImg(filePath: string){
-        if(!filePath) throw new BadRequestException('File path is required')
-        const config = {
-            Bucket: this.bucketName,
-            Key: filePath
-        } 
-        const deleteCommand = new DeleteObjectCommand(config)
-        await this.storageService.send(deleteCommand)
-        return 'deleted successfully'
-    }
-
-
+  private requireStorage() {
+    if (!this.bucketName)
+      throw new ServiceUnavailableException('S3 storage is not configured');
+  }
 }

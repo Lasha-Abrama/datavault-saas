@@ -1,67 +1,77 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { SignInDto } from './dto/sign-in.dto';
 import { SignUpDto } from './dto/sign-up.dto';
 import { JwtService } from '@nestjs/jwt';
-import { Role } from 'src/enums/roles.enum';
-import { User } from 'src/users/entities/user.entity';
-import * as bcrypt from 'bcrypt'
+import { User } from '../users/entities/user.entity';
+import { GoogleUser } from './auth.types';
+import * as bcrypt from 'bcryptjs';
+import { isDuplicateKeyError } from '../users/database-errors';
 
 @Injectable()
 export class AuthService {
   constructor(
-    @InjectModel('user') private userModel: Model<User>,
-    private jwtService: JwtService
-  ) { }
+    @InjectModel('user') private readonly userModel: Model<User>,
+    private readonly jwtService: JwtService,
+  ) {}
 
   async signIn({ email, password }: SignInDto) {
-    const existUser = await this.userModel.findOne({ email }).select('+password')
-    if (!existUser) throw new BadRequestException('Invalid Credentials')
-
-    const isPassedEqual = await bcrypt.compare(password, existUser.password)
-    if (!isPassedEqual) throw new BadRequestException('Invalid Credentials')
-
-    const payLoad = {
-      id: existUser._id,
-      role: existUser.role
-    }
-
-    const accessToken = await this.jwtService.sign(payLoad, { expiresIn: '1h' })
-
-    return { accessToken }
+    const user = await this.userModel.findOne({ email }).select('+password');
+    if (!user?.password || !(await bcrypt.compare(password, user.password)))
+      throw new UnauthorizedException('Invalid credentials');
+    return {
+      accessToken: await this.jwtService.signAsync({
+        id: user._id.toString(),
+        role: user.role,
+      }),
+    };
   }
 
-  async signInWithGoogle(user){
-    let existsUser = await this.userModel.findOne({email: user.email})
-    if(!existsUser){
-      existsUser = await this.userModel.create({
-        email: user.email,
-        avatar: user.avatar,
-        fullName: user.fullName
-      })
+  async signInWithGoogle(user: GoogleUser) {
+    let existing = await this.userModel.findOne({ email: user.email });
+    if (!existing) {
+      try {
+        existing = await this.userModel.create(user);
+      } catch (error) {
+        if (!isDuplicateKeyError(error)) throw error;
+        existing = await this.userModel.findOne({ email: user.email });
+        if (!existing) throw error;
+      }
     }
-    existsUser.avatar = user.avatar
-    await existsUser.save()
-    
-    const payLoad = {
-      id: existsUser._id,
-      role: existsUser.role
-    }
-    const accessToken = await this.jwtService.sign(payLoad, { expiresIn: '1h' })
-    return accessToken
+    existing.avatar = user.avatar;
+    await existing.save();
+    return this.jwtService.signAsync({
+      id: existing._id.toString(),
+      role: existing.role,
+    });
   }
 
   async signUp({ email, fullName, password }: SignUpDto) {
-    const existUser = await this.userModel.findOne({ email: email })
-    if (existUser) throw new BadRequestException('User Already exists')
-
-    const hashedPass = await bcrypt.hash(password, 10)
-    await this.userModel.create({ email,password: hashedPass, fullName })
-    return 'user created successfully'
+    if (await this.userModel.exists({ email }))
+      throw new ConflictException('User already exists');
+    try {
+      await this.userModel.create({
+        email,
+        password: await bcrypt.hash(password, 10),
+        fullName,
+      });
+    } catch (error) {
+      if (isDuplicateKeyError(error))
+        throw new ConflictException('User already exists');
+      throw error;
+    }
+    return 'user created successfully';
   }
 
   async getCurrentUser(userId: string) {
-    return await this.userModel.findById(userId)
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+    return user;
   }
 }
