@@ -10,6 +10,7 @@ import { PlansModule } from './plans/plans.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { FilesModule } from './files/files.module';
+import { StatisticsModule } from './statistics/statistics.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { FilesModule } from './files/files.module';
     SubscriptionsModule,
     InvitationsModule,
     FilesModule,
+    StatisticsModule,
   ],
 })
 export class AppModule {}

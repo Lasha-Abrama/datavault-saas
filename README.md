@@ -45,6 +45,12 @@ The estimate uses the current plan and current employee count because the assign
 
 `EntitlementsService` is the internal boundary for employee and file limits. Invitation creation reserves a seat, and acceptance converts that reservation into an employee in a transaction. Free permits no employees, Basic permits 10 employees plus the owner, and Premium has no employee limit. Successful file uploads record metadata and monthly usage in the same transaction; deletion never refunds an upload count.
 
+## Bonus: company statistics dashboard
+
+`GET /statistics/current` is an additional read-only dashboard endpoint beyond the original assignment requirements. Activated owners and members receive statistics only for the company derived from their JWT. The response combines accepted employees, live pending invitations, current file-metadata counts by visibility, activation-anchored upload usage, current plan capacity, Premium overage, and the existing integer-cent billing calculation. It accepts no calculation or tenant inputs and sends `Cache-Control: private, no-store`.
+
+Currently stored files and current-period successful uploads are separate values: deleting a file removes its metadata from the stored count but does not reduce historical monthly upload usage. `remainingUploads` is finite for Free and Basic and `null` for Premium, where uploads beyond the included 1,000 are billed as overage. Employee limits use the same convention: `null` means unlimited.
+
 ## Private company files
 
 Configure `AWS_BUCKET_NAME` and `AWS_REGION` to enable file operations. Use a private bucket with S3 Block Public Access enabled and an IAM role allowing only the required `PutObject`, `GetObject`, and `DeleteObject` operations. Explicit access-key credentials are optional; the SDK's default credential chain supports deployment IAM roles. Unconfigured storage returns HTTP 503. The previous public CloudFront URL helper has been removed.
@@ -77,6 +83,7 @@ Deletion removes the S3 object first, then its tenant-scoped metadata. S3 failur
 - `src/files`: tenant-owned metadata, multipart validation, upload compensation, private downloads, and deletion policy
 - `src/aws-s3`: provider-neutral object-storage contract and private S3 adapter
 - `src/config`: startup validation and shared HTTP configuration
+- `src/statistics`: bonus tenant dashboard composed from existing authoritative domain data
 
 ## Commands
 
@@ -118,3 +125,4 @@ npm run start:prod
 - `GET /files/:id/download` — authenticated private attachment stream
 - `PATCH /files/:id/permissions` — uploader or company owner replaces visibility and restricted employees
 - `DELETE /files/:id` — uploader or company owner deletes a company file
+- `GET /statistics/current` — activated owner/member tenant dashboard; accepts no client-supplied statistics
