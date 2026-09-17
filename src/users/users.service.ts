@@ -77,6 +77,7 @@ export class UsersService {
   }
 
   async deleteUser(actor: AuthenticatedUser, targetUserId: string) {
+    this.requireOwner(actor);
     const target = await this.findOne(actor, targetUserId);
     if (target.role === Role.COMPANY_OWNER)
       throw new BadRequestException('The company owner cannot be deleted');

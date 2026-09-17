@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
   Header,
   Param,
+  Patch,
   Post,
   Query,
   StreamableFile,
@@ -19,6 +21,10 @@ import { IsValidMongoDBId } from '../users/dto/is-valid-objectID.dto';
 import { QueryParams } from '../users/dto/query-params.dto';
 import { contentDisposition, UploadedCompanyFile } from './file-validation';
 import { FilesService } from './files.service';
+import {
+  UpdateFilePermissionsDto,
+  UploadFilePermissionsDto,
+} from './dto/file-permissions.dto';
 
 @Controller('files')
 @UseGuards(IsAuthGuard)
@@ -30,8 +36,9 @@ export class FilesController {
   upload(
     @CurrentUser() actor: AuthenticatedUser,
     @UploadedFile() file?: UploadedCompanyFile,
+    @Body() permissions?: UploadFilePermissionsDto,
   ) {
-    return this.filesService.upload(actor, file);
+    return this.filesService.upload(actor, file, permissions);
   }
 
   @Get()
@@ -63,6 +70,15 @@ export class FilesController {
     @Param() { id }: IsValidMongoDBId,
   ) {
     return this.filesService.findOne(actor, id);
+  }
+
+  @Patch(':id/permissions')
+  updatePermissions(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param() { id }: IsValidMongoDBId,
+    @Body() dto: UpdateFilePermissionsDto,
+  ) {
+    return this.filesService.updatePermissions(actor, id, dto);
   }
 
   @Delete(':id')

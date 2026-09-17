@@ -48,6 +48,7 @@ export class UsersController {
   }
 
   @Delete(':id')
+  @Roles(Role.COMPANY_OWNER)
   remove(
     @CurrentUser() user: AuthenticatedUser,
     @Param() { id }: IsValidMongoDBId,

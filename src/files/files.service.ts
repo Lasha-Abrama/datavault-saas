@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -7,7 +8,7 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { Connection, Model } from 'mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import { ObjectStorage } from '../aws-s3/object-storage';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { Role } from '../enums/roles.enum';
@@ -15,8 +16,16 @@ import { EntitlementsService } from '../subscriptions/entitlements.service';
 import { EntitlementDenialReason } from '../subscriptions/subscription.constants';
 import { IsValidMongoDBId } from '../users/dto/is-valid-objectID.dto';
 import { QueryParams } from '../users/dto/query-params.dto';
-import { CompanyFile } from './entities/company-file.entity';
+import { User } from '../users/entities/user.entity';
+import {
+  CompanyFile,
+  CompanyFileVisibility,
+} from './entities/company-file.entity';
 import { UploadedCompanyFile, validateCompanyFile } from './file-validation';
+import {
+  UpdateFilePermissionsDto,
+  UploadFilePermissionsDto,
+} from './dto/file-permissions.dto';
 
 @Injectable()
 export class FilesService {
@@ -25,6 +34,7 @@ export class FilesService {
   constructor(
     @InjectModel('companyFile')
     private readonly fileModel: Model<CompanyFile>,
+    @InjectModel('user') private readonly userModel: Model<User>,
     private readonly storage: ObjectStorage,
     private readonly entitlements: EntitlementsService,
     private readonly config: ConfigService,
@@ -34,11 +44,17 @@ export class FilesService {
   async upload(
     actor: AuthenticatedUser,
     upload: UploadedCompanyFile | undefined,
+    permissions: UploadFilePermissionsDto = new UploadFilePermissionsDto(),
     now = new Date(),
   ) {
     const file = validateCompanyFile(
       upload,
       this.config.getOrThrow<number>('FILE_MAX_SIZE_BYTES'),
+    );
+    const normalizedPermissions = await this.validatePermissions(
+      actor,
+      permissions.visibility,
+      permissions.restrictedUserIds,
     );
     const availability = await this.entitlements.checkFileUpload(
       actor.companyId,
@@ -78,6 +94,7 @@ export class FilesService {
                 fileType: file.fileType,
                 mimeType: file.mimeType,
                 size: file.size,
+                ...normalizedPermissions,
               },
             ],
             { session },
@@ -117,7 +134,7 @@ export class FilesService {
 
   async findAll(actor: AuthenticatedUser, { page, take }: QueryParams) {
     take = Math.min(take, 30);
-    const filter = { companyId: actor.companyId };
+    const filter = this.accessFilter(actor);
     const [files, total] = await Promise.all([
       this.fileModel
         .find(filter)
@@ -137,7 +154,7 @@ export class FilesService {
   async findOne(actor: AuthenticatedUser, fileId: string) {
     const file = await this.fileModel.findOne({
       _id: fileId,
-      companyId: actor.companyId,
+      ...this.accessFilter(actor),
     });
     if (!file) throw new NotFoundException('File not found');
     return this.publicMetadata(file);
@@ -169,12 +186,43 @@ export class FilesService {
     return { message: 'File deleted.' };
   }
 
+  async updatePermissions(
+    actor: AuthenticatedUser,
+    fileId: string,
+    dto: UpdateFilePermissionsDto,
+  ) {
+    const file = await this.fileModel.findOne({
+      _id: fileId,
+      companyId: actor.companyId,
+    });
+    if (!file) throw new NotFoundException('File not found');
+    if (
+      actor.role !== Role.COMPANY_OWNER &&
+      file.uploaderId.toString() !== actor.id
+    )
+      throw new ForbiddenException(
+        'Only the uploader or company owner can change file permissions',
+      );
+    const permissions = await this.validatePermissions(
+      actor,
+      dto.visibility,
+      dto.restrictedUserIds,
+    );
+    const updated = await this.fileModel.findOneAndUpdate(
+      { _id: fileId, companyId: actor.companyId },
+      { $set: permissions },
+      { new: true, runValidators: true },
+    );
+    if (!updated) throw new NotFoundException('File not found');
+    return this.publicMetadata(updated);
+  }
+
   private async findStoredFile(
     actor: AuthenticatedUser,
     fileId: IsValidMongoDBId['id'],
   ) {
     const file = await this.fileModel
-      .findOne({ _id: fileId, companyId: actor.companyId })
+      .findOne({ _id: fileId, ...this.accessFilter(actor) })
       .select('+storageKey');
     if (!file) throw new NotFoundException('File not found');
     return file;
@@ -188,9 +236,65 @@ export class FilesService {
       fileType: file.fileType,
       mimeType: file.mimeType,
       size: file.size,
+      visibility: file.visibility ?? CompanyFileVisibility.COMPANY_WIDE,
+      restrictedUserIds: file.restrictedUserIds ?? [],
       createdAt: file.createdAt,
       updatedAt: file.updatedAt,
     };
+  }
+
+  private accessFilter(actor: AuthenticatedUser) {
+    if (actor.role === Role.COMPANY_OWNER)
+      return { companyId: actor.companyId };
+    return {
+      companyId: actor.companyId,
+      $or: [
+        { visibility: CompanyFileVisibility.COMPANY_WIDE },
+        { visibility: { $exists: false } },
+        { uploaderId: actor.id },
+        { restrictedUserIds: actor.id },
+      ],
+    };
+  }
+
+  private async validatePermissions(
+    actor: AuthenticatedUser,
+    visibility: CompanyFileVisibility,
+    suppliedUserIds: string[] | undefined,
+  ) {
+    if (!Object.values(CompanyFileVisibility).includes(visibility))
+      throw new BadRequestException('File visibility is invalid');
+    const restrictedUserIds = [...new Set(suppliedUserIds ?? [])];
+    if (restrictedUserIds.length !== (suppliedUserIds ?? []).length)
+      throw new BadRequestException('Restricted employees must be unique');
+    if (
+      visibility === CompanyFileVisibility.COMPANY_WIDE &&
+      restrictedUserIds.length > 0
+    )
+      throw new BadRequestException(
+        'Company-wide files cannot have restricted employees',
+      );
+    if (
+      visibility === CompanyFileVisibility.RESTRICTED &&
+      restrictedUserIds.length === 0
+    )
+      throw new BadRequestException(
+        'Restricted files require at least one employee',
+      );
+    if (restrictedUserIds.some((userId) => !Types.ObjectId.isValid(userId)))
+      throw new BadRequestException('Restricted employees are invalid');
+    if (restrictedUserIds.length > 0) {
+      const matchingEmployees = await this.userModel.countDocuments({
+        _id: { $in: restrictedUserIds },
+        companyId: actor.companyId,
+        role: Role.COMPANY_MEMBER,
+      });
+      if (matchingEmployees !== restrictedUserIds.length)
+        throw new BadRequestException(
+          'Restricted employees must be active members of the company',
+        );
+    }
+    return { visibility, restrictedUserIds };
   }
 
   private hasUnknownCommitResult(error: unknown) {

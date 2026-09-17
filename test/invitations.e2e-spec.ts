@@ -415,6 +415,26 @@ describe('employee invitations (e2e)', () => {
     expect(invitations.size).toBe(0);
   });
 
+  it('prevents members from listing, resending, or revoking invitations', async () => {
+    await invite('managed@example.com').expect(202);
+    const invitationId = [...invitations.keys()][0];
+    await request(app.getHttpServer())
+      .get('/invitations')
+      .set(authorization(memberToken))
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/invitations/${invitationId}/resend`)
+      .set(authorization(memberToken))
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/invitations/${invitationId}`)
+      .set(authorization(memberToken))
+      .expect(403);
+    expect(invitations.get(invitationId)?.status).toBe(
+      InvitationStatus.PENDING,
+    );
+  });
+
   it('binds normalized invitations to the owner company and emails only the raw token', async () => {
     const response = await invite(' EMPLOYEE@EXAMPLE.COM ').expect(202);
     const state = [...invitations.values()][0];

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Logger,
   NotFoundException,
@@ -9,7 +10,10 @@ import { Readable } from 'stream';
 import { Types } from 'mongoose';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { Role } from '../enums/roles.enum';
-import { CompanyFileType } from './entities/company-file.entity';
+import {
+  CompanyFileType,
+  CompanyFileVisibility,
+} from './entities/company-file.entity';
 import { FilesService } from './files.service';
 
 function selectable<T>(value: T) {
@@ -50,6 +54,8 @@ describe('FilesService', () => {
     fileType: CompanyFileType.CSV,
     mimeType: 'text/csv',
     size: 7,
+    visibility: CompanyFileVisibility.COMPANY_WIDE,
+    restrictedUserIds: [],
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -57,9 +63,11 @@ describe('FilesService', () => {
     create: jest.fn(),
     find: jest.fn(),
     findOne: jest.fn(),
+    findOneAndUpdate: jest.fn(),
     findOneAndDelete: jest.fn(),
     countDocuments: jest.fn(),
   };
+  const userModel = { countDocuments: jest.fn() };
   const storage = {
     putObject: jest.fn(),
     getObject: jest.fn(),
@@ -76,6 +84,7 @@ describe('FilesService', () => {
   };
   const service = new FilesService(
     model as never,
+    userModel as never,
     storage,
     entitlements as never,
     config,
@@ -97,6 +106,8 @@ describe('FilesService', () => {
     entitlements.recordFileUploads.mockResolvedValue({});
     model.create.mockResolvedValue([metadata]);
     model.findOneAndDelete.mockResolvedValue(metadata);
+    model.findOneAndUpdate.mockResolvedValue(metadata);
+    userModel.countDocuments.mockResolvedValue(1);
     storage.putObject.mockResolvedValue(undefined);
     storage.getObject.mockResolvedValue({
       stream: Readable.from('a,b\n1,2'),
@@ -137,6 +148,8 @@ describe('FilesService', () => {
       uploaderId: member.id,
       storageKey: putCall.key,
       originalFilename: 'data.csv',
+      visibility: CompanyFileVisibility.COMPANY_WIDE,
+      restrictedUserIds: [],
     });
     expect(result).not.toHaveProperty('storageKey');
   });
@@ -206,7 +219,15 @@ describe('FilesService', () => {
     await expect(
       service.findAll(member, { page: 2, take: 100 }),
     ).resolves.toMatchObject({ total: 1, page: 2, take: 30 });
-    expect(model.find).toHaveBeenCalledWith({ companyId: member.companyId });
+    expect(model.find).toHaveBeenCalledWith({
+      companyId: member.companyId,
+      $or: [
+        { visibility: CompanyFileVisibility.COMPANY_WIDE },
+        { visibility: { $exists: false } },
+        { uploaderId: member.id },
+        { restrictedUserIds: member.id },
+      ],
+    });
     expect(query.skip).toHaveBeenCalledWith(30);
 
     model.findOne.mockReturnValue(selectable(null));
@@ -220,6 +241,75 @@ describe('FilesService', () => {
     const result = await service.download(member, fileId.toString());
     expect(storage.getObject).toHaveBeenCalledWith(metadata.storageKey);
     expect(result.stream).toBeInstanceOf(Readable);
+  });
+
+  it('validates restricted employees in the actor company before uploading', async () => {
+    const selectedId = new Types.ObjectId().toString();
+    await service.upload(member, csv, {
+      visibility: CompanyFileVisibility.RESTRICTED,
+      restrictedUserIds: [selectedId],
+    });
+    expect(userModel.countDocuments).toHaveBeenCalledWith({
+      _id: { $in: [selectedId] },
+      companyId: member.companyId,
+      role: Role.COMPANY_MEMBER,
+    });
+    expect(model.create).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          visibility: CompanyFileVisibility.RESTRICTED,
+          restrictedUserIds: [selectedId],
+        }),
+      ],
+      { session },
+    );
+
+    userModel.countDocuments.mockResolvedValue(0);
+    await expect(
+      service.upload(member, csv, {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [new Types.ObjectId().toString()],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(storage.putObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('enforces permission invariants and permits only uploader or owner updates', async () => {
+    model.findOne.mockReturnValue(selectable(metadata));
+    await expect(
+      service.updatePermissions(member, fileId.toString(), {
+        visibility: CompanyFileVisibility.RESTRICTED,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.updatePermissions(member, fileId.toString(), {
+        visibility: CompanyFileVisibility.COMPANY_WIDE,
+        restrictedUserIds: [new Types.ObjectId().toString()],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    const selectedId = new Types.ObjectId().toString();
+    await service.updatePermissions(owner, fileId.toString(), {
+      visibility: CompanyFileVisibility.RESTRICTED,
+      restrictedUserIds: [selectedId],
+    });
+    expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: fileId.toString(), companyId: owner.companyId },
+      {
+        $set: {
+          visibility: CompanyFileVisibility.RESTRICTED,
+          restrictedUserIds: [selectedId],
+        },
+      },
+      { new: true, runValidators: true },
+    );
+
+    const otherMember = { ...member, id: new Types.ObjectId().toString() };
+    await expect(
+      service.updatePermissions(otherMember, fileId.toString(), {
+        visibility: CompanyFileVisibility.COMPANY_WIDE,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('allows the uploader or owner to delete without reducing usage', async () => {

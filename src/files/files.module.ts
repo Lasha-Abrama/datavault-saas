@@ -8,6 +8,7 @@ import { SubscriptionsDomainModule } from '../subscriptions/subscriptions-domain
 import { companyFileSchema } from './entities/company-file.entity';
 import { FilesController } from './files.controller';
 import { FilesService } from './files.service';
+import { userSchema } from '../users/entities/user.entity';
 
 @Module({
   imports: [
@@ -20,13 +21,15 @@ import { FilesService } from './files.service';
         limits: {
           fileSize: config.getOrThrow<number>('FILE_MAX_SIZE_BYTES'),
           files: 1,
-          fields: 0,
-          parts: 1,
+          fields: 2,
+          parts: 3,
+          fieldSize: 16 * 1024,
         },
       }),
     }),
     MongooseModule.forFeature([
       { name: 'companyFile', schema: companyFileSchema },
+      { name: 'user', schema: userSchema },
     ]),
   ],
   controllers: [FilesController],

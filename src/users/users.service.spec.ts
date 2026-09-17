@@ -122,6 +122,23 @@ describe('UsersService tenant boundaries', () => {
     expect(model.findOneAndDelete).not.toHaveBeenCalled();
   });
 
+  it('allows only an owner to delete a company member', async () => {
+    model.findOne.mockResolvedValue(memberDocument);
+    model.findOneAndDelete.mockResolvedValue(memberDocument);
+    await expect(service.deleteUser(member, memberId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(model.findOneAndDelete).not.toHaveBeenCalled();
+
+    await expect(service.deleteUser(owner, memberId)).resolves.toBe(
+      memberDocument,
+    );
+    expect(model.findOneAndDelete).toHaveBeenCalledWith({
+      _id: memberId,
+      companyId,
+    });
+  });
+
   it('does not let an owner replace the verified company email through profile updates', async () => {
     model.findOne.mockResolvedValue({
       ...memberDocument,

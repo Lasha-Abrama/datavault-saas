@@ -12,7 +12,10 @@ import { ObjectStorage } from '../src/aws-s3/object-storage';
 import { configureApp } from '../src/config/configure-app';
 import { EmailSender } from '../src/email/email-sender';
 import { Role } from '../src/enums/roles.enum';
-import { CompanyFileType } from '../src/files/entities/company-file.entity';
+import {
+  CompanyFileType,
+  CompanyFileVisibility,
+} from '../src/files/entities/company-file.entity';
 import { PlanCode } from '../src/plans/plan.constants';
 import { billingPeriod } from '../src/subscriptions/billing-period';
 
@@ -20,6 +23,7 @@ interface UserState {
   _id: Types.ObjectId;
   companyId: Types.ObjectId;
   role: Role;
+  email?: string;
 }
 
 interface CompanyState {
@@ -53,6 +57,8 @@ interface FileState {
   fileType: CompanyFileType;
   mimeType: string;
   size: number;
+  visibility: CompanyFileVisibility;
+  restrictedUserIds: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -110,7 +116,9 @@ describe('company files (e2e)', () => {
   const ownerId = new Types.ObjectId();
   const memberId = new Types.ObjectId();
   const otherMemberId = new Types.ObjectId();
+  const unauthorizedMemberId = new Types.ObjectId();
   const otherOwnerId = new Types.ObjectId();
+  const otherCompanyMemberId = new Types.ObjectId();
   const users = new Map<string, UserState>();
   const companies = new Map<string, CompanyState>();
   const subscriptions = new Map<string, SubscriptionState>();
@@ -120,6 +128,7 @@ describe('company files (e2e)', () => {
   let ownerToken: string;
   let memberToken: string;
   let otherMemberToken: string;
+  let unauthorizedMemberToken: string;
   let otherOwnerToken: string;
   let transactionTail = Promise.resolve();
   let failNextMetadataCreate = false;
@@ -129,16 +138,54 @@ describe('company files (e2e)', () => {
   beforeAll(async () => {
     const userModel = {
       findById: jest.fn((id: string) => Promise.resolve(users.get(id) ?? null)),
-      countDocuments: jest.fn((filter: { companyId: string; role?: Role }) =>
-        Promise.resolve(
-          [...users.values()].filter(
-            (user) =>
-              user.companyId.toString() === String(filter.companyId) &&
-              (filter.role === undefined || user.role === filter.role),
-          ).length,
-        ),
+      countDocuments: jest.fn(
+        (filter: { _id?: { $in: string[] }; companyId: string; role?: Role }) =>
+          Promise.resolve(
+            [...users.values()].filter(
+              (user) =>
+                user.companyId.toString() === String(filter.companyId) &&
+                (filter.role === undefined || user.role === filter.role) &&
+                (filter._id === undefined ||
+                  filter._id.$in.includes(user._id.toString())),
+            ).length,
+          ),
       ),
-      findOne: jest.fn().mockResolvedValue(null),
+      findOne: jest.fn(
+        (filter: { _id?: string; companyId?: string; email?: string }) =>
+          Promise.resolve(
+            [...users.values()].find(
+              (user) =>
+                (filter._id === undefined ||
+                  user._id.toString() === String(filter._id)) &&
+                (filter.companyId === undefined ||
+                  user.companyId.toString() === String(filter.companyId)) &&
+                (filter.email === undefined || user.email === filter.email),
+            ) ?? null,
+          ),
+      ),
+      find: jest.fn((filter: { companyId: string }) => {
+        let result = [...users.values()].filter(
+          (user) => user.companyId.toString() === String(filter.companyId),
+        );
+        const query = {
+          sort: () => query,
+          skip: (count: number) => {
+            result = result.slice(count);
+            return query;
+          },
+          limit: (count: number) => Promise.resolve(result.slice(0, count)),
+        };
+        return query;
+      }),
+      findOneAndDelete: jest.fn(
+        (filter: { _id: string; companyId: string }) => {
+          const user = users.get(String(filter._id));
+          if (!user || user.companyId.toString() !== String(filter.companyId))
+            return Promise.resolve(null);
+          users.delete(user._id.toString());
+          return Promise.resolve(user);
+        },
+      ),
     };
     const companyModel = {
       findOne: jest.fn((filter: { _id: Types.ObjectId }) =>
@@ -204,6 +251,47 @@ describe('company files (e2e)', () => {
         },
       ),
     };
+    const matchesFile = (
+      file: FileState,
+      filter: {
+        _id?: string;
+        companyId?: string;
+        storageKey?: string;
+        $or?: Array<Record<string, unknown>>;
+      },
+    ) => {
+      if (
+        filter._id !== undefined &&
+        file._id.toString() !== String(filter._id)
+      )
+        return false;
+      if (
+        filter.companyId !== undefined &&
+        file.companyId !== String(filter.companyId)
+      )
+        return false;
+      if (
+        filter.storageKey !== undefined &&
+        file.storageKey !== filter.storageKey
+      )
+        return false;
+      if (!filter.$or) return true;
+      return filter.$or.some((condition) => {
+        if ('visibility' in condition) {
+          const expected = condition.visibility;
+          if (typeof expected === 'object')
+            return file.visibility === undefined;
+          return file.visibility === expected;
+        }
+        if ('uploaderId' in condition)
+          return file.uploaderId === String(condition.uploaderId);
+        if ('restrictedUserIds' in condition)
+          return file.restrictedUserIds.includes(
+            String(condition.restrictedUserIds),
+          );
+        return false;
+      });
+    };
     const fileModel = {
       create: jest.fn(
         (inputs: Omit<FileState, '_id' | 'createdAt' | 'updatedAt'>[]) => {
@@ -222,9 +310,9 @@ describe('company files (e2e)', () => {
           return Promise.resolve([file]);
         },
       ),
-      find: jest.fn((filter: { companyId: string }) => {
-        let result = [...files.values()].filter(
-          (file) => file.companyId === String(filter.companyId),
+      find: jest.fn((filter: Parameters<typeof matchesFile>[1]) => {
+        let result = [...files.values()].filter((file) =>
+          matchesFile(file, filter),
         );
         result.sort(
           (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
@@ -239,21 +327,31 @@ describe('company files (e2e)', () => {
         };
         return query;
       }),
-      countDocuments: jest.fn((filter: { companyId: string }) =>
+      countDocuments: jest.fn((filter: Parameters<typeof matchesFile>[1]) =>
         Promise.resolve(
-          [...files.values()].filter(
-            (file) => file.companyId === String(filter.companyId),
-          ).length,
+          [...files.values()].filter((file) => matchesFile(file, filter))
+            .length,
         ),
       ),
-      findOne: jest.fn((filter: { _id: string; companyId: string }) =>
+      findOne: jest.fn((filter: Parameters<typeof matchesFile>[1]) =>
         selectable(
-          [...files.values()].find(
-            (file) =>
-              file._id.toString() === String(filter._id) &&
-              file.companyId === String(filter.companyId),
-          ) ?? null,
+          [...files.values()].find((file) => matchesFile(file, filter)) ?? null,
         ),
+      ),
+      findOneAndUpdate: jest.fn(
+        (
+          filter: Parameters<typeof matchesFile>[1],
+          update: {
+            $set: Pick<FileState, 'visibility' | 'restrictedUserIds'>;
+          },
+        ) => {
+          const file = [...files.values()].find((value) =>
+            matchesFile(value, filter),
+          );
+          if (!file) return Promise.resolve(null);
+          Object.assign(file, update.$set, { updatedAt: new Date() });
+          return Promise.resolve(file);
+        },
       ),
       findOneAndDelete: jest.fn(
         (filter: { _id: string; companyId: string; storageKey: string }) => {
@@ -308,7 +406,10 @@ describe('company files (e2e)', () => {
             [...periods].map(([key, value]) => [key, { ...value }]),
           );
           const fileSnapshot = new Map(
-            [...files].map(([key, value]) => [key, { ...value }]),
+            [...files].map(([key, value]) => [
+              key,
+              { ...value, restrictedUserIds: [...value.restrictedUserIds] },
+            ]),
           );
           const subscriptionSnapshot = new Map(
             [...subscriptions].map(([key, value]) => [key, { ...value }]),
@@ -373,6 +474,9 @@ describe('company files (e2e)', () => {
     ownerToken = jwt.sign({ id: ownerId.toString() });
     memberToken = jwt.sign({ id: memberId.toString() });
     otherMemberToken = jwt.sign({ id: otherMemberId.toString() });
+    unauthorizedMemberToken = jwt.sign({
+      id: unauthorizedMemberId.toString(),
+    });
     otherOwnerToken = jwt.sign({ id: otherOwnerId.toString() });
   });
 
@@ -392,9 +496,16 @@ describe('company files (e2e)', () => {
       [ownerId, companyId, Role.COMPANY_OWNER],
       [memberId, companyId, Role.COMPANY_MEMBER],
       [otherMemberId, companyId, Role.COMPANY_MEMBER],
+      [unauthorizedMemberId, companyId, Role.COMPANY_MEMBER],
       [otherOwnerId, otherCompanyId, Role.COMPANY_OWNER],
+      [otherCompanyMemberId, otherCompanyId, Role.COMPANY_MEMBER],
     ] as const)
-      users.set(id.toString(), { _id: id, companyId: tenantId, role });
+      users.set(id.toString(), {
+        _id: id,
+        companyId: tenantId,
+        role,
+        email: `${id.toString()}@example.test`,
+      });
     companies.set(companyId.toString(), { _id: companyId, activatedAt });
     companies.set(otherCompanyId.toString(), {
       _id: otherCompanyId,
@@ -419,11 +530,27 @@ describe('company files (e2e)', () => {
     mime: string,
     body: Buffer,
     token = memberToken,
-  ) =>
-    request(app.getHttpServer())
+    permissions?: {
+      visibility: CompanyFileVisibility;
+      restrictedUserIds?: string[];
+    },
+  ) => {
+    const pending = request(app.getHttpServer())
       .post('/files')
-      .set(auth(token))
-      .attach('file', body, { filename: name, contentType: mime });
+      .set(auth(token));
+    if (permissions) {
+      pending.field('visibility', permissions.visibility);
+      if (permissions.restrictedUserIds)
+        pending.field(
+          'restrictedUserIds',
+          JSON.stringify(permissions.restrictedUserIds),
+        );
+    }
+    return pending.attach('file', body, {
+      filename: name,
+      contentType: mime,
+    });
+  };
 
   const seedPeriod = (uploadedFiles: number) => {
     const subscription = subscriptions.get(companyId.toString())!;
@@ -460,6 +587,338 @@ describe('company files (e2e)', () => {
         key.startsWith(`companies/${companyId.toString()}/files/`),
       ),
     ).toBe(true);
+  });
+
+  it('enforces company-wide and restricted visibility for lists, metadata, and downloads', async () => {
+    const companyWide = await upload(
+      'company.csv',
+      'text/csv',
+      Buffer.from('a,b'),
+      ownerToken,
+    ).expect(201);
+    const restricted = await upload(
+      'restricted.csv',
+      'text/csv',
+      Buffer.from('a,b'),
+      memberToken,
+      {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [otherMemberId.toString()],
+      },
+    ).expect(201);
+    const multiRestricted = await upload(
+      'multi.csv',
+      'text/csv',
+      Buffer.from('a,b'),
+      ownerToken,
+      {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [
+          otherMemberId.toString(),
+          unauthorizedMemberId.toString(),
+        ],
+      },
+    ).expect(201);
+    expect(companyWide.body).toMatchObject({
+      visibility: CompanyFileVisibility.COMPANY_WIDE,
+      restrictedUserIds: [],
+    });
+    expect(restricted.body).toMatchObject({
+      visibility: CompanyFileVisibility.RESTRICTED,
+      restrictedUserIds: [otherMemberId.toString()],
+    });
+
+    const expectedListTotals = [
+      [ownerToken, 3],
+      [memberToken, 2],
+      [otherMemberToken, 3],
+      [unauthorizedMemberToken, 2],
+    ] as const;
+    for (const [token, total] of expectedListTotals)
+      await request(app.getHttpServer())
+        .get('/files')
+        .set(auth(token))
+        .expect(200)
+        .expect(({ body }: { body: { total: number } }) =>
+          expect(body.total).toBe(total),
+        );
+
+    const restrictedId = (restricted.body as { id: string }).id;
+    await request(app.getHttpServer())
+      .get(`/files/${restrictedId}`)
+      .set(auth(memberToken))
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/files/${restrictedId}`)
+      .set(auth(otherMemberToken))
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/files/${restrictedId}`)
+      .set(auth(ownerToken))
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/files/${restrictedId}`)
+      .set(auth(unauthorizedMemberToken))
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/files/${restrictedId}/download`)
+      .set(auth(unauthorizedMemberToken))
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/files/${restrictedId}/download`)
+      .set(auth(otherMemberToken))
+      .expect(200);
+    expect(
+      (multiRestricted.body as { restrictedUserIds: string[] })
+        .restrictedUserIds,
+    ).toEqual([otherMemberId.toString(), unauthorizedMemberId.toString()]);
+  });
+
+  it('applies uploader/owner permission changes immediately without touching S3', async () => {
+    const uploaded = await upload(
+      'permissions.csv',
+      'text/csv',
+      Buffer.from('a,b'),
+      memberToken,
+      {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [otherMemberId.toString()],
+      },
+    ).expect(201);
+    const fileId = (uploaded.body as { id: string }).id;
+    const storageKeys = [...objects.keys()];
+
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .send({ visibility: CompanyFileVisibility.COMPANY_WIDE })
+      .expect(401);
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(otherOwnerToken))
+      .send({ visibility: CompanyFileVisibility.COMPANY_WIDE })
+      .expect(404);
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(memberToken))
+      .send({
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [otherCompanyMemberId.toString()],
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(memberToken))
+      .send({
+        visibility: CompanyFileVisibility.COMPANY_WIDE,
+        companyId: otherCompanyId.toString(),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(otherMemberToken))
+      .send({ visibility: CompanyFileVisibility.COMPANY_WIDE })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(memberToken))
+      .send({ visibility: CompanyFileVisibility.COMPANY_WIDE })
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) =>
+        expect(body).toMatchObject({
+          visibility: CompanyFileVisibility.COMPANY_WIDE,
+          restrictedUserIds: [],
+        }),
+      );
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}`)
+      .set(auth(unauthorizedMemberToken))
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/files')
+      .set(auth(unauthorizedMemberToken))
+      .expect(200)
+      .expect(({ body }: { body: { total: number } }) =>
+        expect(body.total).toBe(1),
+      );
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}/download`)
+      .set(auth(unauthorizedMemberToken))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(memberToken))
+      .send({
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [unauthorizedMemberId.toString()],
+      })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}`)
+      .set(auth(otherMemberToken))
+      .expect(404);
+    await request(app.getHttpServer())
+      .get('/files')
+      .set(auth(otherMemberToken))
+      .expect(200)
+      .expect(({ body }: { body: { total: number } }) =>
+        expect(body.total).toBe(0),
+      );
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}/download`)
+      .set(auth(otherMemberToken))
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}`)
+      .set(auth(unauthorizedMemberToken))
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}/download`)
+      .set(auth(unauthorizedMemberToken))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(ownerToken))
+      .send({
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [otherMemberId.toString()],
+      })
+      .expect(200);
+    expect([...objects.keys()]).toEqual(storageKeys);
+    expect(objects.size).toBe(1);
+  });
+
+  it('rejects invalid visibility metadata and cross-company employee injection before storage', async () => {
+    const deletedEmployeeId = new Types.ObjectId().toString();
+    const invalidCases: Array<{
+      visibility: CompanyFileVisibility;
+      restrictedUserIds?: string[];
+    }> = [
+      { visibility: CompanyFileVisibility.RESTRICTED },
+      {
+        visibility: CompanyFileVisibility.COMPANY_WIDE,
+        restrictedUserIds: [memberId.toString()],
+      },
+      {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [otherCompanyMemberId.toString()],
+      },
+      {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [ownerId.toString()],
+      },
+      {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [deletedEmployeeId],
+      },
+      {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [memberId.toString(), memberId.toString()],
+      },
+    ];
+    for (const permissions of invalidCases)
+      await upload(
+        'invalid-permissions.csv',
+        'text/csv',
+        Buffer.from('a,b'),
+        memberToken,
+        permissions,
+      ).expect(400);
+    await request(app.getHttpServer())
+      .post('/files')
+      .set(auth(memberToken))
+      .field('visibility', CompanyFileVisibility.COMPANY_WIDE)
+      .field('companyId', otherCompanyId.toString())
+      .attach('file', Buffer.from('a,b'), {
+        filename: 'injected.csv',
+        contentType: 'text/csv',
+      })
+      .expect(400);
+    expect(objects.size).toBe(0);
+    expect(files.size).toBe(0);
+    expect(periods.size).toBe(0);
+  });
+
+  it('allows only the owner to delete employees and makes stale file grants ineffective', async () => {
+    const uploaded = await upload(
+      'employee-access.csv',
+      'text/csv',
+      Buffer.from('a,b'),
+      memberToken,
+      {
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [otherMemberId.toString()],
+      },
+    ).expect(201);
+    const fileId = (uploaded.body as { id: string }).id;
+    await request(app.getHttpServer())
+      .delete(`/users/${otherMemberId.toString()}`)
+      .set(auth(otherMemberToken))
+      .expect(403);
+    await request(app.getHttpServer())
+      .get('/users')
+      .set(auth(memberToken))
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/users/${otherMemberId.toString()}`)
+      .set(auth(unauthorizedMemberToken))
+      .send({ fullName: 'Unauthorized change' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/users/${otherMemberId.toString()}`)
+      .set(auth(otherOwnerToken))
+      .expect(404);
+    await request(app.getHttpServer())
+      .delete(`/users/${otherMemberId.toString()}`)
+      .set(auth(ownerToken))
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}`)
+      .set(auth(otherMemberToken))
+      .expect(401);
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}`)
+      .set(auth(unauthorizedMemberToken))
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}`)
+      .set(auth(ownerToken))
+      .expect(200)
+      .expect(({ body }: { body: { restrictedUserIds: string[] } }) =>
+        expect(body.restrictedUserIds).toEqual([otherMemberId.toString()]),
+      );
+    await request(app.getHttpServer())
+      .get('/users')
+      .set(auth(ownerToken))
+      .expect(200)
+      .expect(({ body }: { body: { users: Array<{ _id: string }> } }) =>
+        expect(body.users.map((user) => user._id)).not.toContain(
+          otherMemberId.toString(),
+        ),
+      );
+    await request(app.getHttpServer())
+      .delete(`/users/${ownerId.toString()}`)
+      .set(auth(ownerToken))
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(ownerToken))
+      .send({
+        visibility: CompanyFileVisibility.RESTRICTED,
+        restrictedUserIds: [otherMemberId.toString()],
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/files/${fileId}/permissions`)
+      .set(auth(ownerToken))
+      .send({ visibility: CompanyFileVisibility.COMPANY_WIDE })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/files/${fileId}`)
+      .set(auth(unauthorizedMemberToken))
+      .expect(200);
   });
 
   it('rejects missing, empty, oversized, unsupported, mismatched, malformed, and injected uploads', async () => {
@@ -567,7 +1026,7 @@ describe('company files (e2e)', () => {
           body,
         }: {
           body: { billingSummary: { totalAmountCents: number } };
-        }) => expect(body.billingSummary.totalAmountCents).toBe(1050),
+        }) => expect(body.billingSummary.totalAmountCents).toBe(1550),
       );
     await upload(
       'blocked-after-downgrade.csv',
@@ -646,6 +1105,8 @@ describe('company files (e2e)', () => {
         fileType: CompanyFileType.CSV,
         mimeType: 'text/csv',
         size: 3,
+        visibility: CompanyFileVisibility.COMPANY_WIDE,
+        restrictedUserIds: [],
         createdAt,
         updatedAt: createdAt,
       });
