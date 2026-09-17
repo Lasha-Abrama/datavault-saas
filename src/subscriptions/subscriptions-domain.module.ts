@@ -7,6 +7,7 @@ import { EntitlementsService } from './entitlements.service';
 import { subscriptionPeriodSchema } from './entities/subscription-period.entity';
 import { subscriptionSchema } from './entities/subscription.entity';
 import { SubscriptionsService } from './subscriptions.service';
+import { BillingService } from './billing.service';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { SubscriptionsService } from './subscriptions.service';
       { name: 'employeeInvitation', schema: employeeInvitationSchema },
     ]),
   ],
-  providers: [SubscriptionsService, EntitlementsService],
+  providers: [BillingService, SubscriptionsService, EntitlementsService],
   exports: [SubscriptionsService, EntitlementsService],
 })
 export class SubscriptionsDomainModule {}

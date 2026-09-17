@@ -384,6 +384,7 @@ describe('company registration and activation (e2e)', () => {
       '/companies/current',
       '/users',
       '/subscriptions/current',
+      '/subscriptions/current/billing',
       '/files',
     ]) {
       await request(app.getHttpServer())

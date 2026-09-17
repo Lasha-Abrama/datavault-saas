@@ -129,7 +129,15 @@ describe('company files (e2e)', () => {
   beforeAll(async () => {
     const userModel = {
       findById: jest.fn((id: string) => Promise.resolve(users.get(id) ?? null)),
-      countDocuments: jest.fn().mockResolvedValue(0),
+      countDocuments: jest.fn((filter: { companyId: string; role?: Role }) =>
+        Promise.resolve(
+          [...users.values()].filter(
+            (user) =>
+              user.companyId.toString() === String(filter.companyId) &&
+              (filter.role === undefined || user.role === filter.role),
+          ).length,
+        ),
+      ),
       findOne: jest.fn().mockResolvedValue(null),
     };
     const companyModel = {
@@ -142,10 +150,21 @@ describe('company files (e2e)', () => {
         Promise.resolve(subscriptions.get(String(filter.companyId)) ?? null),
       ),
       findOneAndUpdate: jest.fn(
-        (filter: { companyId: string }, update: { $inc?: object }) => {
-          const subscription = subscriptions.get(String(filter.companyId));
+        (
+          filter: { companyId?: string; _id?: Types.ObjectId },
+          update: {
+            $inc?: object;
+            $set?: { planCode: PlanCode; planChangedAt: Date };
+          },
+        ) => {
+          const subscription = filter.companyId
+            ? subscriptions.get(String(filter.companyId))
+            : [...subscriptions.values()].find((value) =>
+                value._id.equals(filter._id),
+              );
           if (!subscription) return Promise.resolve(null);
           if (update.$inc) subscription.revision++;
+          if (update.$set) Object.assign(subscription, update.$set);
           return Promise.resolve(subscription);
         },
       ),
@@ -291,6 +310,9 @@ describe('company files (e2e)', () => {
           const fileSnapshot = new Map(
             [...files].map(([key, value]) => [key, { ...value }]),
           );
+          const subscriptionSnapshot = new Map(
+            [...subscriptions].map(([key, value]) => [key, { ...value }]),
+          );
           try {
             return await work({});
           } catch (error) {
@@ -298,6 +320,10 @@ describe('company files (e2e)', () => {
             periodSnapshot.forEach((value, key) => periods.set(key, value));
             files.clear();
             fileSnapshot.forEach((value, key) => files.set(key, value));
+            subscriptions.clear();
+            subscriptionSnapshot.forEach((value, key) =>
+              subscriptions.set(key, value),
+            );
             throw error;
           }
         });
@@ -508,6 +534,76 @@ describe('company files (e2e)', () => {
       uploadedFiles: 1001,
       fileOverageCents: 50,
     });
+    await request(app.getHttpServer())
+      .get('/subscriptions/current/billing')
+      .set(auth(memberToken))
+      .expect(200)
+      .expect(
+        ({
+          body,
+        }: {
+          body: {
+            successfulUploads: number;
+            billableOverageUploads: number;
+            overageChargeCents: number;
+            totalAmountCents: number;
+          };
+        }) =>
+          expect(body).toMatchObject({
+            successfulUploads: 1001,
+            billableOverageUploads: 1,
+            overageChargeCents: 50,
+            totalAmountCents: 30050,
+          }),
+      );
+
+    await request(app.getHttpServer())
+      .patch('/subscriptions/current')
+      .set(auth(ownerToken))
+      .send({ planCode: PlanCode.BASIC })
+      .expect(200)
+      .expect(
+        ({
+          body,
+        }: {
+          body: { billingSummary: { totalAmountCents: number } };
+        }) => expect(body.billingSummary.totalAmountCents).toBe(1050),
+      );
+    await upload(
+      'blocked-after-downgrade.csv',
+      'text/csv',
+      Buffer.from('a,b'),
+    ).expect(403);
+    expect(periods.get(companyId.toString())).toMatchObject({
+      uploadedFiles: 1001,
+      fileOverageCents: 50,
+    });
+  });
+
+  it('serializes a final Premium upload against an immediate downgrade', async () => {
+    subscriptions.get(companyId.toString())!.planCode = PlanCode.PREMIUM;
+    seedPeriod(1000);
+
+    const [uploadResponse, downgradeResponse] = await Promise.all([
+      upload('plan-race.csv', 'text/csv', Buffer.from('a,b')),
+      request(app.getHttpServer())
+        .patch('/subscriptions/current')
+        .set(auth(ownerToken))
+        .send({ planCode: PlanCode.BASIC }),
+    ]);
+
+    expect(downgradeResponse.status).toBe(200);
+    expect([201, 403]).toContain(uploadResponse.status);
+    const period = periods.get(companyId.toString())!;
+    expect(subscriptions.get(companyId.toString())!.planCode).toBe(
+      PlanCode.BASIC,
+    );
+    expect(period.uploadedFiles).toBe(
+      uploadResponse.status === 201 ? 1001 : 1000,
+    );
+    expect(period.fileOverageCents).toBe(
+      uploadResponse.status === 201 ? 50 : 0,
+    );
   });
 
   it('serializes concurrent final-slot uploads and cleans up the rejected object', async () => {

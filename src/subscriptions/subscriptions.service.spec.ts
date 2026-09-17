@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { Role } from '../enums/roles.enum';
 import { PLAN_CATALOG, PlanCode } from '../plans/plan.constants';
+import { BillingService } from './billing.service';
 import { SubscriptionsService } from './subscriptions.service';
 
 describe('SubscriptionsService', () => {
@@ -26,6 +27,7 @@ describe('SubscriptionsService', () => {
   const plansService = {
     findOne: jest.fn((code: PlanCode) => PLAN_CATALOG[code]),
   };
+  const billingService = new BillingService(plansService as never);
   const session = {};
   const connection = {
     transaction: jest.fn((work: (value: object) => unknown) => work(session)),
@@ -36,6 +38,7 @@ describe('SubscriptionsService', () => {
     userModel as never,
     invitationModel as never,
     plansService as never,
+    billingService,
     connection as never,
   );
   const owner: AuthenticatedUser = {
@@ -80,6 +83,11 @@ describe('SubscriptionsService', () => {
       plan: { code: PlanCode.BASIC },
       employeeCount: 2,
       monthlyPriceEstimateCents: 1000,
+      billingSummary: {
+        calculationBasis: 'current_plan_estimate_with_recorded_overage',
+        employeeChargeCents: 1000,
+        totalAmountCents: 1000,
+      },
       billingPeriod: {
         startsAt: new Date('2026-02-15T12:00:00.000Z'),
         uploadedFiles: 0,
@@ -89,11 +97,18 @@ describe('SubscriptionsService', () => {
     expect(subscriptionModel.findOne).toHaveBeenCalledWith(
       { companyId: companyId.toString() },
       null,
-      undefined,
+      { session },
     );
-    expect(periodModel.findOne).toHaveBeenCalledWith({
-      companyId: companyId.toString(),
-      startsAt: new Date('2026-02-15T12:00:00.000Z'),
+    expect(periodModel.findOne).toHaveBeenCalledWith(
+      {
+        companyId: companyId.toString(),
+        startsAt: new Date('2026-02-15T12:00:00.000Z'),
+      },
+      null,
+      { session },
+    );
+    expect(connection.transaction).toHaveBeenCalledWith(expect.any(Function), {
+      readConcern: { level: 'snapshot' },
     });
   });
 
@@ -155,6 +170,28 @@ describe('SubscriptionsService', () => {
       new: true,
       runValidators: true,
       session,
+    });
+  });
+
+  it('retains recorded Premium overage in a post-downgrade estimate', async () => {
+    subscriptionModel.findOne.mockResolvedValue({
+      ...subscription,
+      planCode: PlanCode.BASIC,
+      planChangedAt: new Date('2026-02-16T00:00:00.000Z'),
+    });
+    periodModel.findOne.mockResolvedValue({
+      uploadedFiles: 1001,
+      fileOverageCents: 50,
+    });
+
+    await expect(
+      service.getCurrentBilling(companyId.toString()),
+    ).resolves.toMatchObject({
+      plan: { code: PlanCode.BASIC },
+      successfulUploads: 1001,
+      billableOverageUploads: 1,
+      overageChargeCents: 50,
+      totalAmountCents: 1050,
     });
   });
 });

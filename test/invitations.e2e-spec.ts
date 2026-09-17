@@ -577,6 +577,52 @@ describe('employee invitations (e2e)', () => {
       .expect(403);
   });
 
+  it('serializes an invitation against a concurrent downgrade', async () => {
+    users.delete(memberId.toString());
+    subscriptions.get(companyId.toString())!.planCode = PlanCode.BASIC;
+
+    const [invitationResponse, downgradeResponse] = await Promise.all([
+      invite('race-with-plan@example.com'),
+      request(app.getHttpServer())
+        .patch('/subscriptions/current')
+        .set(authorization(ownerToken))
+        .send({ planCode: PlanCode.FREE }),
+    ]);
+
+    expect(
+      [invitationResponse.status, downgradeResponse.status].sort(),
+    ).toEqual([202, 403]);
+    const currentPlan = subscriptions.get(companyId.toString())!.planCode;
+    const pendingCount = [...invitations.values()].filter(
+      (invitation) => invitation.status === InvitationStatus.PENDING,
+    ).length;
+    expect(
+      currentPlan === PlanCode.FREE ? pendingCount === 0 : pendingCount === 1,
+    ).toBe(true);
+  });
+
+  it('serializes concurrent plan changes without moving the billing anchor', async () => {
+    users.delete(memberId.toString());
+    const subscription = subscriptions.get(companyId.toString())!;
+    const originalAnchor = subscription.activatedAt.getTime();
+
+    const responses = await Promise.all([
+      request(app.getHttpServer())
+        .patch('/subscriptions/current')
+        .set(authorization(ownerToken))
+        .send({ planCode: PlanCode.PREMIUM }),
+      request(app.getHttpServer())
+        .patch('/subscriptions/current')
+        .set(authorization(ownerToken))
+        .send({ planCode: PlanCode.FREE }),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect([PlanCode.PREMIUM, PlanCode.FREE]).toContain(subscription.planCode);
+    expect(subscription.activatedAt.getTime()).toBe(originalAnchor);
+    expect(subscription.revision).toBe(2);
+  });
+
   it('rotates resend tokens, keeps responses generic, and recovers after SMTP failure', async () => {
     sender.send.mockRejectedValueOnce(new Error('SMTP unavailable'));
     await invite('employee@example.com').expect(503);

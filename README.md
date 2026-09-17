@@ -37,6 +37,10 @@ The code-defined plan catalog is the source of truth and is idempotently synchro
 
 Each company has one subscription. Plan changes take effect immediately, preserve the original activation/billing anchor, and do not reset the current period's usage. A downgrade is rejected when accepted employees plus live pending invitations exceed the target plan. There are no payment, invoice, trial, cancellation, or provider states yet; a subscription record represents enabled internal entitlements only.
 
+`GET /subscriptions/current/billing` returns an internal current-period estimate in integer USD cents. The response derives every value server-side from the authenticated company: the code-defined current plan supplies its base price, employee unit price, included upload allowance, and Premium overage unit price; the user collection supplies the current accepted employee count (the owner and pending invitations are not billed); and the current `SubscriptionPeriod` supplies successful uploads and overage already recorded when Premium uploads succeeded. The total is `baseAmountCents + employeeChargeCents + overageChargeCents`.
+
+The estimate uses the current plan and current employee count because the assignment defines neither proration nor historical employee/plan charging rules. It is always labeled `current_plan_estimate_with_recorded_overage`, includes `planChangedInCurrentPeriod`, and is not an invoice or payment state. An immediate plan change retains the activation-day anchor and accumulated upload usage. Recorded Premium overage remains in the period after a downgrade, while the new plan controls future entitlements. A downgrade may therefore leave usage above the new file allowance; later uploads stay blocked until the next activation-anchored period. Period ends are exclusive, and day-29/30/31 anchors clamp to the last UTC day of short months before returning to the original day when possible.
+
 `EntitlementsService` is the internal boundary for employee and file limits. Invitation creation reserves a seat, and acceptance converts that reservation into an employee in a transaction. Free permits no employees, Basic permits 10 employees plus the owner, and Premium has no employee limit. Successful file uploads record metadata and monthly usage in the same transaction; deletion never refunds an upload count.
 
 ## Private company files
@@ -62,6 +66,7 @@ Deletion removes the S3 object first, then its tenant-scoped metadata. S3 failur
 - `src/users`: tenant-scoped management of existing users
 - `src/plans`: immutable plan definitions, persisted catalog schema, and public read route
 - `src/subscriptions`: company subscription state, calendar billing periods, and centralized entitlement enforcement
+- `src/subscriptions/billing.service.ts`: authoritative current-period billing estimate from plan, employees, and upload accounting
 - `src/common`: current-user context plus extensible role metadata and guard
 - `src/files`: tenant-owned metadata, multipart validation, upload compensation, private downloads, and deletion policy
 - `src/aws-s3`: provider-neutral object-storage contract and private S3 adapter
@@ -98,6 +103,7 @@ npm run start:prod
 - `DELETE /users/:id` — member self-delete or owner deletes a member
 - `GET /plans` — public plan catalog
 - `GET /subscriptions/current` — any authenticated company user
+- `GET /subscriptions/current/billing` — owner/member internal current-period estimate; no calculation inputs
 - `PATCH /subscriptions/current` — company owner changes the company plan
 - `POST /files` — authenticated multipart upload using the `file` field
 - `GET /files` — company file list using `page` and `take`, capped at 30 per page

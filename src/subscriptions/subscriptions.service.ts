@@ -17,6 +17,7 @@ import {
 import { billingPeriod } from './billing-period';
 import { SubscriptionPeriod } from './entities/subscription-period.entity';
 import { Subscription } from './entities/subscription.entity';
+import { BillingService } from './billing.service';
 
 @Injectable()
 export class SubscriptionsService {
@@ -29,6 +30,7 @@ export class SubscriptionsService {
     @InjectModel('employeeInvitation')
     private readonly invitationModel: Model<EmployeeInvitation>,
     private readonly plansService: PlansService,
+    private readonly billingService: BillingService,
     @InjectConnection() private readonly connection: Connection,
   ) {}
 
@@ -52,31 +54,51 @@ export class SubscriptionsService {
   }
 
   async getCurrent(companyId: string, at = new Date()) {
-    const subscription = await this.getSubscription(companyId);
-    const plan = this.plansService.findOne(subscription.planCode);
-    const period = billingPeriod(subscription.activatedAt, at);
-    const [usage, employeeCount] = await Promise.all([
-      this.periodModel.findOne({ companyId, startsAt: period.startsAt }),
-      this.userModel.countDocuments({
-        companyId,
-        role: Role.COMPANY_MEMBER,
-      }),
-    ]);
+    return this.connection.transaction(
+      async (session) => {
+        const subscription = await this.getSubscription(companyId, session);
+        const plan = this.plansService.findOne(subscription.planCode);
+        const period = billingPeriod(subscription.activatedAt, at);
+        const usage = await this.periodModel.findOne(
+          { companyId, startsAt: period.startsAt },
+          null,
+          { session },
+        );
+        const employeeCount = await this.userModel.countDocuments(
+          {
+            companyId,
+            role: Role.COMPANY_MEMBER,
+          },
+          { session },
+        );
+        const billingSummary = this.billingService.calculate(
+          subscription,
+          usage,
+          employeeCount,
+          at,
+        );
 
-    return {
-      companyId: subscription.companyId,
-      plan,
-      activatedAt: subscription.activatedAt,
-      planChangedAt: subscription.planChangedAt,
-      billingPeriod: {
-        ...period,
-        uploadedFiles: usage?.uploadedFiles ?? 0,
-        fileOverageCents: usage?.fileOverageCents ?? 0,
+        return {
+          companyId: subscription.companyId,
+          plan,
+          activatedAt: subscription.activatedAt,
+          planChangedAt: subscription.planChangedAt,
+          billingPeriod: {
+            ...period,
+            uploadedFiles: usage?.uploadedFiles ?? 0,
+            fileOverageCents: usage?.fileOverageCents ?? 0,
+          },
+          employeeCount,
+          monthlyPriceEstimateCents: billingSummary.totalAmountCents,
+          billingSummary,
+        };
       },
-      employeeCount,
-      monthlyPriceEstimateCents:
-        plan.basePriceCents + employeeCount * plan.employeePriceCents,
-    };
+      { readConcern: { level: 'snapshot' } },
+    );
+  }
+
+  async getCurrentBilling(companyId: string) {
+    return (await this.getCurrent(companyId)).billingSummary;
   }
 
   async changePlan(actor: AuthenticatedUser, planCode: PlanCode) {
@@ -87,20 +109,18 @@ export class SubscriptionsService {
 
     await this.connection.transaction(async (session) => {
       const subscription = await this.acquireLock(actor.companyId, session);
-      const [employeeCount, pendingInvitationCount] = await Promise.all([
-        this.userModel.countDocuments(
-          { companyId: actor.companyId, role: Role.COMPANY_MEMBER },
-          { session },
-        ),
-        this.invitationModel.countDocuments(
-          {
-            companyId: actor.companyId,
-            status: InvitationStatus.PENDING,
-            expiresAt: { $gt: changedAt },
-          },
-          { session },
-        ),
-      ]);
+      const employeeCount = await this.userModel.countDocuments(
+        { companyId: actor.companyId, role: Role.COMPANY_MEMBER },
+        { session },
+      );
+      const pendingInvitationCount = await this.invitationModel.countDocuments(
+        {
+          companyId: actor.companyId,
+          status: InvitationStatus.PENDING,
+          expiresAt: { $gt: changedAt },
+        },
+        { session },
+      );
       if (
         plan.maxEmployees !== null &&
         employeeCount + pendingInvitationCount > plan.maxEmployees

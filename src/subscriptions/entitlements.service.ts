@@ -16,12 +16,14 @@ import { billingPeriod } from './billing-period';
 import { EntitlementDenialReason } from './subscription.constants';
 import { SubscriptionPeriod } from './entities/subscription-period.entity';
 import { SubscriptionsService } from './subscriptions.service';
+import { BillingService } from './billing.service';
 
 @Injectable()
 export class EntitlementsService {
   constructor(
     private readonly subscriptionsService: SubscriptionsService,
     private readonly plansService: PlansService,
+    private readonly billingService: BillingService,
     @InjectModel('user') private readonly userModel: Model<User>,
     @InjectModel('employeeInvitation')
     private readonly invitationModel: Model<EmployeeInvitation>,
@@ -46,20 +48,18 @@ export class EntitlementsService {
     );
     const plan = this.plansService.findOne(subscription.planCode);
     if (plan.maxEmployees === null) return;
-    const [employeeCount, pendingInvitationCount] = await Promise.all([
-      this.userModel.countDocuments(
-        { companyId, role: Role.COMPANY_MEMBER },
-        { session },
-      ),
-      this.invitationModel.countDocuments(
-        {
-          companyId,
-          status: InvitationStatus.PENDING,
-          expiresAt: { $gt: at },
-        },
-        { session },
-      ),
-    ]);
+    const employeeCount = await this.userModel.countDocuments(
+      { companyId, role: Role.COMPANY_MEMBER },
+      { session },
+    );
+    const pendingInvitationCount = await this.invitationModel.countDocuments(
+      {
+        companyId,
+        status: InvitationStatus.PENDING,
+        expiresAt: { $gt: at },
+      },
+      { session },
+    );
     if (
       employeeCount + pendingInvitationCount + additionalSeats >
       plan.maxEmployees
@@ -89,10 +89,6 @@ export class EntitlementsService {
       0,
       resultingFiles - plan.includedFilesPerMonth,
     );
-    const existingExcessFiles = Math.max(
-      0,
-      uploadedFiles - plan.includedFilesPerMonth,
-    );
     const allowed = plan.extraFilePriceCents !== null || excessFiles === 0;
 
     return {
@@ -107,7 +103,11 @@ export class EntitlementsService {
         plan.includedFilesPerMonth - uploadedFiles,
       ),
       additionalChargeCents:
-        (excessFiles - existingExcessFiles) * (plan.extraFilePriceCents ?? 0),
+        this.billingService.calculateAdditionalOverageCents(
+          plan,
+          uploadedFiles,
+          resultingFiles,
+        ),
       billingPeriod: period,
     };
   }
@@ -155,7 +155,6 @@ export class EntitlementsService {
     );
     const uploadedFiles = usage?.uploadedFiles ?? 0;
     const resultingFiles = uploadedFiles + quantity;
-    const priorExcess = Math.max(0, uploadedFiles - plan.includedFilesPerMonth);
     const resultingExcess = Math.max(
       0,
       resultingFiles - plan.includedFilesPerMonth,
@@ -167,7 +166,11 @@ export class EntitlementsService {
         limit: plan.includedFilesPerMonth,
       });
     const additionalOverageCents =
-      (resultingExcess - priorExcess) * (plan.extraFilePriceCents ?? 0);
+      this.billingService.calculateAdditionalOverageCents(
+        plan,
+        uploadedFiles,
+        resultingFiles,
+      );
 
     return this.periodModel.findOneAndUpdate(
       { companyId, startsAt: period.startsAt },

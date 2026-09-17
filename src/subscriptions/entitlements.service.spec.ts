@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PLAN_CATALOG, PlanCode } from '../plans/plan.constants';
 import { EntitlementsService } from './entitlements.service';
 import { EntitlementDenialReason } from './subscription.constants';
+import { BillingService } from './billing.service';
 
 describe('EntitlementsService', () => {
   const companyId = 'company-id';
@@ -14,6 +15,7 @@ describe('EntitlementsService', () => {
   const plansService = {
     findOne: jest.fn((code: PlanCode) => PLAN_CATALOG[code]),
   };
+  const billingService = new BillingService(plansService as never);
   const userModel = { countDocuments: jest.fn() };
   const invitationModel = { countDocuments: jest.fn() };
   const periodModel = {
@@ -26,6 +28,7 @@ describe('EntitlementsService', () => {
   const service = new EntitlementsService(
     subscriptionsService as never,
     plansService as never,
+    billingService,
     userModel as never,
     invitationModel as never,
     periodModel as never,

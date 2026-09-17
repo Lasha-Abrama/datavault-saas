@@ -319,6 +319,69 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
         },
       ));
 
+  it('exposes an authenticated, tenant-derived billing estimate to owners and members', async () => {
+    await request(app.getHttpServer())
+      .get('/subscriptions/current/billing')
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/subscriptions/current/billing')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect('Cache-Control', 'private, no-store')
+      .expect(200)
+      .expect(
+        ({
+          body,
+        }: {
+          body: {
+            companyId: string;
+            calculationBasis: string;
+            currency: string;
+            plan: { code: PlanCode };
+            employeeCount: number;
+            totalAmountCents: number;
+          };
+        }) => {
+          expect(body).toMatchObject({
+            companyId: companyId.toString(),
+            calculationBasis: 'current_plan_estimate_with_recorded_overage',
+            currency: 'USD',
+            plan: { code: PlanCode.FREE },
+            employeeCount: 1,
+            totalAmountCents: 0,
+          });
+        },
+      );
+    await request(app.getHttpServer())
+      .get('/subscriptions/current/billing')
+      .set('Authorization', `Bearer ${otherOwnerToken}`)
+      .expect(200)
+      .expect(
+        ({ body }: { body: { companyId: string; totalAmountCents: number } }) =>
+          expect(body).toMatchObject({
+            companyId: otherCompanyId.toString(),
+            totalAmountCents: 500,
+          }),
+      );
+  });
+
+  it('rejects client-supplied billing inputs and fails closed without a subscription', async () => {
+    await request(app.getHttpServer())
+      .get(
+        `/subscriptions/current/billing?companyId=${otherCompanyId.toString()}&employeeCount=0&totalAmountCents=0`,
+      )
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/subscriptions/current/billing')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ uploadCount: 0, overageChargeCents: 0 })
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/subscriptions/current/billing')
+      .set('Authorization', `Bearer ${unsubscribedOwnerToken}`)
+      .expect(404);
+  });
+
   it('fails closed for a company without a subscription', () =>
     request(app.getHttpServer())
       .get('/subscriptions/current')
