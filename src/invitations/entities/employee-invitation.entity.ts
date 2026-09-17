@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 
 export enum InvitationStatus {
   PENDING = 'pending',
@@ -11,7 +11,7 @@ export enum InvitationStatus {
 @Schema({ timestamps: true })
 export class EmployeeInvitation {
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'company',
     required: true,
     immutable: true,
@@ -20,7 +20,7 @@ export class EmployeeInvitation {
   companyId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'user',
     required: true,
     immutable: true,

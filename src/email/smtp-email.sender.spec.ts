@@ -1,7 +1,14 @@
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter } from 'node:events';
+import net, { Socket } from 'node:net';
 import nodemailer from 'nodemailer';
+import type { SMTPTransportOptions } from 'nodemailer/lib/smtp-transport';
 import { SmtpEmailSender } from './smtp-email.sender';
 
+jest.mock('node:net', () => ({
+  __esModule: true,
+  default: { createConnection: jest.fn() },
+}));
 jest.mock('nodemailer', () => ({
   __esModule: true,
   default: { createTransport: jest.fn() },
@@ -9,6 +16,10 @@ jest.mock('nodemailer', () => ({
 
 describe('SmtpEmailSender', () => {
   it('configures bounded timeouts and TLS and sends without logging credentials', async () => {
+    const socket = Object.assign(new EventEmitter(), {
+      destroy: jest.fn(),
+    }) as unknown as Socket;
+    jest.mocked(net.createConnection).mockReturnValue(socket);
     const sendMail = jest.fn().mockResolvedValue(undefined);
     const createTransport = jest.mocked(nodemailer.createTransport);
     createTransport.mockReturnValue({ sendMail } as never);
@@ -23,7 +34,10 @@ describe('SmtpEmailSender', () => {
         SMTP_PASSWORD: 'secret',
       }),
     );
-    expect(createTransport).toHaveBeenCalledWith({
+    const transportOptions = createTransport.mock
+      .calls[0][0] as SMTPTransportOptions;
+    const { getSocket, ...smtpOptions } = transportOptions;
+    expect(smtpOptions).toEqual({
       host: 'smtp.example.test',
       port: 587,
       secure: false,
@@ -35,6 +49,16 @@ describe('SmtpEmailSender', () => {
       disableFileAccess: true,
       disableUrlAccess: true,
     });
+    expect(getSocket).toBeDefined();
+    const socketCallback = jest.fn();
+    getSocket?.(transportOptions, socketCallback);
+    expect(net.createConnection).toHaveBeenCalledWith({
+      host: 'smtp.example.test',
+      port: 587,
+      family: 4,
+    });
+    socket.emit('connect');
+    expect(socketCallback).toHaveBeenCalledWith(null, { connection: socket });
     await sender.send({
       to: 'owner@example.com',
       subject: 'Activation',

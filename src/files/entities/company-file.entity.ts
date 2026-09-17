@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 
 export enum CompanyFileType {
   CSV = 'csv',
@@ -15,7 +15,7 @@ export enum CompanyFileVisibility {
 @Schema({ timestamps: true })
 export class CompanyFile {
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'company',
     required: true,
     immutable: true,
@@ -24,7 +24,7 @@ export class CompanyFile {
   companyId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'user',
     required: true,
     immutable: true,
@@ -67,7 +67,7 @@ export class CompanyFile {
   visibility: CompanyFileVisibility;
 
   @Prop({
-    type: [{ type: Types.ObjectId, ref: 'user' }],
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'user' }],
     default: [],
   })
   restrictedUserIds: Types.ObjectId[];

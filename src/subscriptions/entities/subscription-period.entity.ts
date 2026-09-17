@@ -1,10 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 
 @Schema({ timestamps: true })
 export class SubscriptionPeriod {
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'company',
     required: true,
     immutable: true,
