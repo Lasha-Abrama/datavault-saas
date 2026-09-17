@@ -267,6 +267,8 @@ describe('company registration and activation (e2e)', () => {
       .useValue({ findOne: jest.fn().mockResolvedValue(null) })
       .overrideProvider(getModelToken('employeeInvitation'))
       .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
+      .overrideProvider(getModelToken('companyFile'))
+      .useValue({})
       .overrideProvider(getModelToken('plan'))
       .useValue({ bulkWrite: jest.fn() })
       .overrideProvider(EmailSender)
@@ -278,6 +280,7 @@ describe('company registration and activation (e2e)', () => {
           ACCOUNT_ACTIVATION_URL: 'https://client.example.test/auth/activate',
           EMPLOYEE_INVITATION_URL:
             'https://client.example.test/invitations/accept',
+          FILE_MAX_SIZE_BYTES: 10485760,
           FRONT_URI: 'https://client.example.test',
         }),
       )
@@ -381,6 +384,7 @@ describe('company registration and activation (e2e)', () => {
       '/companies/current',
       '/users',
       '/subscriptions/current',
+      '/files',
     ]) {
       await request(app.getHttpServer())
         .get(path)

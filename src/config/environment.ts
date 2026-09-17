@@ -33,6 +33,16 @@ export function validateEnvironment(config: Record<string, unknown>) {
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)
     throw new Error('PORT must be an integer between 1 and 65535');
   result.PORT = Number(port);
+  const fileMaxSizeBytes = text('FILE_MAX_SIZE_BYTES') || '10485760';
+  if (
+    !/^\d+$/.test(fileMaxSizeBytes) ||
+    Number(fileMaxSizeBytes) < 1 ||
+    Number(fileMaxSizeBytes) > 104857600
+  )
+    throw new Error(
+      'FILE_MAX_SIZE_BYTES must be an integer between 1 and 104857600',
+    );
+  result.FILE_MAX_SIZE_BYTES = Number(fileMaxSizeBytes);
   required('ACCOUNT_ACTIVATION_URL');
   httpUrl('ACCOUNT_ACTIVATION_URL');
   requireHttpsOutsideLocalhost('ACCOUNT_ACTIVATION_URL');
@@ -99,7 +109,6 @@ export function validateEnvironment(config: Record<string, unknown>) {
       required('AWS_SECRET_ACCESS_KEY');
     }
   }
-  if (text('CLOUD_FRONT_URL')) httpUrl('CLOUD_FRONT_URL');
   return result;
 
   function boolean(key: string, defaultValue: boolean) {

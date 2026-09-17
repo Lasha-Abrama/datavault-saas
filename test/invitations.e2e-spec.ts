@@ -296,6 +296,8 @@ describe('employee invitations (e2e)', () => {
       .useValue(companyModel)
       .overrideProvider(getModelToken('employeeInvitation'))
       .useValue(invitationModel)
+      .overrideProvider(getModelToken('companyFile'))
+      .useValue({})
       .overrideProvider(getModelToken('subscription'))
       .useValue(subscriptionModel)
       .overrideProvider(getModelToken('subscriptionPeriod'))
@@ -312,6 +314,7 @@ describe('employee invitations (e2e)', () => {
           JWT_SECRET: 'a-secure-test-secret-with-32-characters',
           EMPLOYEE_INVITATION_URL:
             'https://client.example.test/invitations/accept',
+          FILE_MAX_SIZE_BYTES: 10485760,
         }),
       )
       .overrideGuard(ThrottlerGuard)

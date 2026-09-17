@@ -1,23 +1,20 @@
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import {
-  BadRequestException,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-
-interface UploadFile {
-  buffer: Buffer;
-  mimetype: string;
-}
+import { Readable } from 'stream';
+import { ObjectStorage, PutObjectInput, StoredObject } from './object-storage';
 
 @Injectable()
-export class AwsS3Service {
+export class AwsS3Service implements ObjectStorage {
   private readonly storageService: S3Client;
   private readonly bucketName?: string;
   private readonly logger = new Logger(AwsS3Service.name);
@@ -43,41 +40,50 @@ export class AwsS3Service {
     });
   }
 
-  async uploadImage(filePath: string, file: UploadFile) {
-    if (!filePath || !file?.buffer || !file.mimetype)
-      throw new BadRequestException('File is required');
+  async putObject(input: PutObjectInput): Promise<void> {
     this.requireStorage();
     try {
       await this.storageService.send(
         new PutObjectCommand({
-          Key: filePath,
+          Key: input.key,
           Bucket: this.bucketName,
-          Body: file.buffer,
-          ContentType: file.mimetype,
+          Body: input.body,
+          ContentType: input.contentType,
         }),
       );
-      return filePath;
     } catch {
       this.logger.error('S3 upload failed');
       throw new ServiceUnavailableException('Could not upload file');
     }
   }
 
-  getFile(filePath: string) {
-    if (!filePath) throw new BadRequestException('File path is required');
-    const baseUrl = this.config.get<string>('CLOUD_FRONT_URL');
-    if (!baseUrl)
-      throw new ServiceUnavailableException('CloudFront URL is not configured');
-    return `${baseUrl.replace(/\/$/, '')}/${filePath.split('/').map(encodeURIComponent).join('/')}`;
+  async getObject(key: string): Promise<StoredObject> {
+    this.requireStorage();
+    try {
+      const result = await this.storageService.send(
+        new GetObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+      if (!(result.Body instanceof Readable)) throw new Error('Missing body');
+      return {
+        stream: result.Body,
+        contentLength: result.ContentLength,
+      };
+    } catch {
+      this.logger.error('S3 download failed');
+      throw new ServiceUnavailableException('Could not download file');
+    }
   }
 
-  async deleteImg(filePath: string) {
-    if (!filePath) throw new BadRequestException('File path is required');
+  async deleteObject(key: string): Promise<void> {
     this.requireStorage();
-    await this.storageService.send(
-      new DeleteObjectCommand({ Bucket: this.bucketName, Key: filePath }),
-    );
-    return 'deleted successfully';
+    try {
+      await this.storageService.send(
+        new DeleteObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+    } catch {
+      this.logger.error('S3 deletion failed');
+      throw new ServiceUnavailableException('Could not delete file');
+    }
   }
 
   private requireStorage() {

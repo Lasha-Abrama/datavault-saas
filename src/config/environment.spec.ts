@@ -11,7 +11,11 @@ const valid = {
 
 describe('validateEnvironment', () => {
   it('applies defaults and accepts disabled optional integrations', () => {
-    expect(validateEnvironment(valid)).toMatchObject({ ...valid, PORT: 3000 });
+    expect(validateEnvironment(valid)).toMatchObject({
+      ...valid,
+      PORT: 3000,
+      FILE_MAX_SIZE_BYTES: 10485760,
+    });
   });
 
   it.each([
@@ -24,6 +28,8 @@ describe('validateEnvironment', () => {
     [{ ...valid, SMTP_PORT: '0' }, 'SMTP_PORT'],
     [{ ...valid, SMTP_SECURE: 'yes' }, 'SMTP_SECURE'],
     [{ ...valid, SMTP_USER: 'user' }, 'SMTP_PASSWORD'],
+    [{ ...valid, FILE_MAX_SIZE_BYTES: '0' }, 'FILE_MAX_SIZE_BYTES'],
+    [{ ...valid, FILE_MAX_SIZE_BYTES: '104857601' }, 'FILE_MAX_SIZE_BYTES'],
     [
       { ...valid, ACCOUNT_ACTIVATION_URL: 'http://client.test' },
       'ACCOUNT_ACTIVATION_URL',

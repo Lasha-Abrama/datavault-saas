@@ -9,6 +9,7 @@ import { validateEnvironment } from './config/environment';
 import { PlansModule } from './plans/plans.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { InvitationsModule } from './invitations/invitations.module';
+import { FilesModule } from './files/files.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { InvitationsModule } from './invitations/invitations.module';
     PlansModule,
     SubscriptionsModule,
     InvitationsModule,
+    FilesModule,
   ],
 })
 export class AppModule {}
