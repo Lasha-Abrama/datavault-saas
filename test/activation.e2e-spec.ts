@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { createHash } from 'node:crypto';
+import * as bcrypt from 'bcryptjs';
 import { Request } from 'express';
 import { Types } from 'mongoose';
 import request from 'supertest';
@@ -50,6 +51,13 @@ interface SubscriptionState {
 interface CompanyFilter {
   _id: Types.ObjectId;
   activatedAt?: null | { $ne: null };
+}
+interface UserFilter {
+  email?: string;
+  _id?: string | Types.ObjectId;
+  companyId?: string | Types.ObjectId;
+  role?: Role;
+  password?: string;
 }
 
 const registration = {
@@ -143,24 +151,39 @@ describe('company registration and activation (e2e)', () => {
         },
       ),
       findById: jest.fn((id: string) => Promise.resolve(users.get(id) ?? null)),
-      findOne: jest.fn(
-        (filter: {
-          email?: string;
-          _id?: Types.ObjectId;
-          companyId?: Types.ObjectId;
-          role?: Role;
-        }) => {
-          const user =
-            [...users.values()].find(
-              (value) =>
-                (filter.email === undefined || value.email === filter.email) &&
-                (filter._id === undefined || value._id.equals(filter._id)) &&
-                (filter.companyId === undefined ||
-                  value.companyId.equals(filter.companyId)) &&
-                (filter.role === undefined || value.role === filter.role),
-            ) ?? null;
-          const result = Promise.resolve(user);
-          return Object.assign(result, { select: () => result });
+      findOne: jest.fn((filter: UserFilter) => {
+        const user =
+          [...users.values()].find(
+            (value) =>
+              (filter.email === undefined || value.email === filter.email) &&
+              (filter._id === undefined ||
+                value._id.toString() === filter._id.toString()) &&
+              (filter.companyId === undefined ||
+                value.companyId.toString() === filter.companyId.toString()) &&
+              (filter.role === undefined || value.role === filter.role) &&
+              (filter.password === undefined ||
+                value.password === filter.password),
+          ) ?? null;
+        const result = Promise.resolve(user);
+        return Object.assign(result, { select: () => result });
+      }),
+      findOneAndUpdate: jest.fn(
+        (
+          filter: UserFilter,
+          update: Partial<UserState> | { $set: Partial<UserState> },
+        ) => {
+          const user = [...users.values()].find(
+            (value) =>
+              (filter._id === undefined ||
+                value._id.toString() === filter._id.toString()) &&
+              (filter.companyId === undefined ||
+                value.companyId.toString() === filter.companyId.toString()) &&
+              (filter.password === undefined ||
+                value.password === filter.password),
+          );
+          if (user)
+            Object.assign(user, '$set' in update ? update.$set : update);
+          return Promise.resolve(user ?? null);
         },
       ),
       countDocuments: jest.fn((filter: { companyId: string; role: Role }) =>
@@ -419,6 +442,103 @@ describe('company registration and activation (e2e)', () => {
       .expect(({ body }: { body: Record<string, unknown> }) =>
         expect(body).not.toHaveProperty('password'),
       );
+  });
+
+  it('changes owner and employee passwords only after verifying the current password', async () => {
+    await register().expect(202);
+    await verify(lastToken()).expect(200);
+    const owner = [...users.values()][0];
+    const ownerLogin = await request(app.getHttpServer())
+      .post('/auth/sign-in')
+      .send({ email: owner.email, password: 'password' })
+      .expect(201);
+    const ownerToken = (ownerLogin.body as { accessToken: string }).accessToken;
+    const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+    await request(app.getHttpServer())
+      .patch('/users/me/password')
+      .send({ currentPassword: 'password', newPassword: 'new-password' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .patch('/users/me/password')
+      .set(auth(ownerToken))
+      .send({ currentPassword: 'wrong-password', newPassword: 'new-password' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .patch('/users/me/password')
+      .set(auth(ownerToken))
+      .send({ currentPassword: 'password', newPassword: 'short' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch('/users/me/password')
+      .set(auth(ownerToken))
+      .send({
+        currentPassword: 'password',
+        newPassword: 'new-password',
+        companyId: new Types.ObjectId().toString(),
+      })
+      .expect(400);
+
+    for (const unsafe of [
+      { password: 'bypass-password' },
+      { email: 'changed@example.com' },
+      { role: Role.COMPANY_OWNER },
+      { companyId: new Types.ObjectId().toString() },
+    ]) {
+      await request(app.getHttpServer())
+        .patch(`/users/${owner._id.toString()}`)
+        .set(auth(ownerToken))
+        .send(unsafe)
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .patch('/users/me/password')
+      .set(auth(ownerToken))
+      .send({ currentPassword: 'password', newPassword: 'new-password' })
+      .expect(200)
+      .expect({ message: 'Password changed successfully' });
+    expect(await bcrypt.compare('new-password', owner.password)).toBe(true);
+    await request(app.getHttpServer())
+      .post('/auth/sign-in')
+      .send({ email: owner.email, password: 'password' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/sign-in')
+      .send({ email: owner.email, password: 'new-password' })
+      .expect(201);
+
+    const employee: UserState = {
+      _id: new Types.ObjectId(),
+      companyId: owner.companyId,
+      email: 'employee@example.com',
+      password: await bcrypt.hash('employee-password', 10),
+      fullName: 'Employee',
+      role: Role.COMPANY_MEMBER,
+      save: jest.fn().mockResolvedValue(undefined),
+      toJSON: () => ({
+        _id: employee._id,
+        companyId: employee.companyId,
+        email: employee.email,
+        fullName: employee.fullName,
+        role: employee.role,
+      }),
+    };
+    users.set(employee._id.toString(), employee);
+    const employeeToken = app
+      .get(JwtService)
+      .sign({ id: employee._id.toString() });
+    await request(app.getHttpServer())
+      .patch('/users/me/password')
+      .set(auth(employeeToken))
+      .send({
+        currentPassword: 'employee-password',
+        newPassword: 'employee-new-password',
+      })
+      .expect(200);
+    expect(
+      await bcrypt.compare('employee-new-password', employee.password),
+    ).toBe(true);
   });
 
   it('rejects invalid, malformed, expired tokens and tenant selectors without activation', async () => {

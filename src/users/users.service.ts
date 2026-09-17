@@ -1,9 +1,9 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -13,7 +13,7 @@ import { QueryParams } from './dto/query-params.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Role } from '../enums/roles.enum';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
-import { isDuplicateKeyError } from './database-errors';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class UsersService {
@@ -47,33 +47,50 @@ export class UsersService {
     targetUserId: string,
     dto: UpdateUserDto,
   ) {
-    const target = await this.findOne(actor, targetUserId);
-    if (
-      dto.email !== undefined &&
-      target.role === Role.COMPANY_OWNER &&
-      dto.email !== target.email
-    )
-      throw new BadRequestException(
-        'The company owner email cannot be changed without verification',
-      );
+    await this.findOne(actor, targetUserId);
     const update: UpdateUserDto = {};
-    if (dto.email !== undefined) update.email = dto.email;
     if (dto.fullName !== undefined) update.fullName = dto.fullName;
-    if (dto.password !== undefined)
-      update.password = await bcrypt.hash(dto.password, 10);
-    try {
-      const user = await this.userModel.findOneAndUpdate(
-        { _id: targetUserId, companyId: actor.companyId },
-        update,
-        { new: true, runValidators: true },
+    const user = await this.userModel.findOneAndUpdate(
+      { _id: targetUserId, companyId: actor.companyId },
+      update,
+      { new: true, runValidators: true },
+    );
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async changePassword(
+    actor: AuthenticatedUser,
+    { currentPassword, newPassword }: ChangePasswordDto,
+  ) {
+    const user = await this.userModel
+      .findOne({ _id: actor.id, companyId: actor.companyId })
+      .select('+password');
+    if (
+      !user?.password ||
+      !(await bcrypt.compare(currentPassword, user.password))
+    )
+      throw new UnauthorizedException('Current password is incorrect');
+    if (await bcrypt.compare(newPassword, user.password))
+      throw new BadRequestException(
+        'The new password must be different from the current password',
       );
-      if (!user) throw new NotFoundException('User not found');
-      return user;
-    } catch (error) {
-      if (isDuplicateKeyError(error))
-        throw new ConflictException('Email is already in use');
-      throw error;
-    }
+
+    const password = await bcrypt.hash(newPassword, 10);
+    const changed = await this.userModel.findOneAndUpdate(
+      {
+        _id: actor.id,
+        companyId: actor.companyId,
+        password: user.password,
+      },
+      { $set: { password } },
+      { new: true, runValidators: true },
+    );
+    if (!changed)
+      throw new UnauthorizedException(
+        'The password changed during this request; try again',
+      );
+    return { message: 'Password changed successfully' };
   }
 
   async deleteUser(actor: AuthenticatedUser, targetUserId: string) {

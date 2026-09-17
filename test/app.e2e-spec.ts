@@ -28,6 +28,13 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
   const unsubscribedOwnerId = new Types.ObjectId();
 
   beforeAll(async () => {
+    const company = {
+      _id: companyId,
+      name: 'Acme',
+      country: 'GE',
+      industry: 'Technology',
+      activatedAt: new Date(),
+    };
     const users = new Map([
       [
         memberId.toString(),
@@ -117,7 +124,13 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       })
       .overrideProvider(getModelToken('company'))
       .useValue({
-        findById: jest.fn().mockResolvedValue({ _id: companyId, name: 'Acme' }),
+        findById: jest.fn().mockResolvedValue(company),
+        findByIdAndUpdate: jest.fn(
+          (_id: string, update: Record<string, unknown>) => {
+            Object.assign(company, update);
+            return Promise.resolve(company);
+          },
+        ),
         findOne: jest.fn().mockResolvedValue({ activatedAt: new Date() }),
       })
       .overrideProvider(getModelToken('companyVerification'))
@@ -246,6 +259,35 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .set('Authorization', `Bearer ${memberToken}`)
       .send({ name: 'Renamed' })
       .expect(403));
+
+  it('allows an owner to update only assignment company-profile fields', async () => {
+    await request(app.getHttpServer())
+      .patch('/companies/current')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ name: 'Renamed', country: 'us', industry: '  Data   Services ' })
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        expect(body).toMatchObject({
+          name: 'Renamed',
+          country: 'US',
+          industry: 'Data Services',
+        });
+      });
+
+    for (const unsafe of [
+      { _id: otherCompanyId.toString() },
+      { activatedAt: null },
+      { email: 'replacement@example.com' },
+      { password: 'replacement-password' },
+      { ownerId: otherUserId.toString() },
+    ]) {
+      await request(app.getHttpServer())
+        .patch('/companies/current')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send(unsafe)
+        .expect(400);
+    }
+  });
 
   it('allows each comma-separated CORS origin', () =>
     request(app.getHttpServer())

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { Types } from 'mongoose';
@@ -38,20 +39,16 @@ describe('UsersService tenant boundaries', () => {
     companyId: new Types.ObjectId(companyId),
     role: Role.COMPANY_MEMBER,
   };
-  let updatedInput: { password: string } | undefined;
   const model = {
     find: jest.fn(),
     countDocuments: jest.fn(),
     findOne: jest.fn(),
-    findOneAndUpdate: jest.fn((...args: unknown[]) => {
-      updatedInput = args[1] as { password: string };
-      return Promise.resolve(memberDocument);
-    }),
+    findOneAndUpdate: jest.fn(),
     findOneAndDelete: jest.fn(),
   };
   const service = new UsersService(model as never);
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => jest.resetAllMocks());
 
   it('scopes lists and counts to the authenticated company', async () => {
     const query = paginatedQuery([memberDocument]);
@@ -97,18 +94,99 @@ describe('UsersService tenant boundaries', () => {
     expect(model.findOne).not.toHaveBeenCalled();
   });
 
-  it('hashes passwords while updating a tenant user', async () => {
+  it('limits generic profile updates to the display name', async () => {
     model.findOne.mockResolvedValue(memberDocument);
-    await service.updateUser(owner, memberId, { password: 'new-password' });
-    expect(updatedInput).toBeDefined();
-    expect(await bcrypt.compare('new-password', updatedInput!.password)).toBe(
-      true,
-    );
+    model.findOneAndUpdate.mockResolvedValue(memberDocument);
+    await service.updateUser(owner, memberId, { fullName: 'Updated Member' });
     expect(model.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: memberId, companyId },
-      updatedInput,
+      { fullName: 'Updated Member' },
       { new: true, runValidators: true },
     );
+  });
+
+  it.each([
+    ['company owner', owner],
+    ['company member', member],
+  ])(
+    'requires the existing password and securely replaces it for a %s',
+    async (_label, actor) => {
+      const currentHash = await bcrypt.hash('current-password', 10);
+      model.findOne.mockReturnValue({
+        select: jest.fn().mockResolvedValue({
+          ...memberDocument,
+          _id: new Types.ObjectId(actor.id),
+          password: currentHash,
+        }),
+      });
+      model.findOneAndUpdate.mockResolvedValue(memberDocument);
+
+      await expect(
+        service.changePassword(actor, {
+          currentPassword: 'current-password',
+          newPassword: 'replacement-password',
+        }),
+      ).resolves.toEqual({ message: 'Password changed successfully' });
+
+      const [filter, update] = model.findOneAndUpdate.mock.calls[0] as [
+        Record<string, unknown>,
+        { $set: { password: string } },
+      ];
+      expect(filter).toEqual({
+        _id: actor.id,
+        companyId: actor.companyId,
+        password: currentHash,
+      });
+      expect(update.$set.password).not.toBe('replacement-password');
+      expect(
+        await bcrypt.compare('replacement-password', update.$set.password),
+      ).toBe(true);
+    },
+  );
+
+  it('rejects an incorrect current password without changing anything', async () => {
+    const currentHash = await bcrypt.hash('current-password', 10);
+    model.findOne.mockReturnValue({
+      select: jest.fn().mockResolvedValue({ password: currentHash }),
+    });
+
+    await expect(
+      service.changePassword(member, {
+        currentPassword: 'incorrect-password',
+        newPassword: 'replacement-password',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects reusing the current password', async () => {
+    const currentHash = await bcrypt.hash('current-password', 10);
+    model.findOne.mockReturnValue({
+      select: jest.fn().mockResolvedValue({ password: currentHash }),
+    });
+
+    await expect(
+      service.changePassword(member, {
+        currentPassword: 'current-password',
+        newPassword: 'current-password',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('fails safely when a concurrent password change wins', async () => {
+    const currentHash = await bcrypt.hash('current-password', 10);
+    model.findOne.mockReturnValue({
+      select: jest.fn().mockResolvedValue({ password: currentHash }),
+    });
+    model.findOneAndUpdate.mockResolvedValue(null);
+
+    await expect(
+      service.changePassword(member, {
+        currentPassword: 'current-password',
+        newPassword: 'replacement-password',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('does not allow the company owner to be deleted', async () => {
@@ -137,17 +215,5 @@ describe('UsersService tenant boundaries', () => {
       _id: memberId,
       companyId,
     });
-  });
-
-  it('does not let an owner replace the verified company email through profile updates', async () => {
-    model.findOne.mockResolvedValue({
-      ...memberDocument,
-      role: Role.COMPANY_OWNER,
-      email: 'owner@example.com',
-    });
-    await expect(
-      service.updateUser(owner, ownerId, { email: 'unverified@example.com' }),
-    ).rejects.toThrow('cannot be changed without verification');
-    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });

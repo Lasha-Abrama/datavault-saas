@@ -18,6 +18,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../enums/roles.enum';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @UseGuards(IsAuthGuard, RolesGuard)
 @Controller('users')
@@ -36,6 +37,14 @@ export class UsersController {
     @Param() { id }: IsValidMongoDBId,
   ) {
     return this.usersService.findOne(user, id);
+  }
+
+  @Patch('me/password')
+  changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.usersService.changePassword(user, dto);
   }
 
   @Patch(':id')

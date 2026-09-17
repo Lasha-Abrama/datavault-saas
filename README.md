@@ -27,7 +27,9 @@ The built-in public-auth limiter is process-local. A horizontally scaled deploym
 
 A company stores its required name, uppercase ISO 3166-1 alpha-2 country, normalized industry, and activation timestamp. Company names are case-insensitively unique. The registration email and password belong to the owner User and are not duplicated on Company. Every user has one required, immutable `companyId` and one role: `company_owner` or `company_member`. User emails remain globally unique so authentication resolves one identity without requiring a tenant hint.
 
-Sign-up atomically creates an inactive company, its owner, its Free subscription, and a hashed 24-hour activation token. The raw token is sent by SMTP after commit and is never stored. Password and Google sign-in are rejected until activation, and the authentication guard also reloads activation state on every protected request. Activated company owners invite employees by email; the 72-hour, single-use invitation is the only path that creates a `company_member`. Acceptance derives the company, email, and role from the stored invitation. Members can read and update only themselves. Only owners may list or delete employees, manage invitations, or invite employees. Owners cannot delete themselves or change their verified email because ownership transfer and email-change verification do not exist yet. Google OAuth signs in existing users and cannot bypass activation.
+Sign-up atomically creates an inactive company, its owner, its Free subscription, and a hashed 24-hour activation token. The raw token is sent by SMTP after commit and is never stored. Password and Google sign-in are rejected until activation, and the authentication guard also reloads activation state on every protected request. Activated company owners invite employees by email; the 72-hour, single-use invitation is the only path that creates a `company_member`. Acceptance derives the company, email, and role from the stored invitation. Members can read and update only themselves. Only owners may list or delete employees, manage invitations, or invite employees. Owners cannot delete themselves. User email, company, and role are immutable through profile updates because email-change verification and ownership transfer do not exist. Google OAuth signs in existing users and cannot bypass activation.
+
+Authenticated owners and employees change their own password through `PATCH /users/me/password`. The endpoint verifies the existing password, requires a different 8–72 character replacement, hashes it with bcrypt, and uses the previous hash as an atomic update condition. Generic user profile updates accept only `fullName`; password and identity fields are rejected by request validation.
 
 JWTs contain only the user id. Authentication reloads the user on every request and derives current company and role data from MongoDB. Tenant-owned queries also include `companyId`, preventing cross-company access even when a target id is known.
 
@@ -103,7 +105,8 @@ npm run start:prod
 - `POST /invitations/accept` — public employee acceptance with token, full name, and password
 - `GET /users` — company owner lists users in their company
 - `GET /users/:id` — self or company owner, within the company
-- `PATCH /users/:id` — self or company owner, within the company
+- `PATCH /users/me/password` — authenticated self-service password change requiring `currentPassword` and `newPassword`
+- `PATCH /users/:id` — self or company owner, within the company; accepts only `fullName`
 - `DELETE /users/:id` — company owner deletes a member; owner self-deletion is rejected
 - `GET /plans` — public plan catalog
 - `GET /subscriptions/current` — any authenticated company user
