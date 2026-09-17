@@ -13,8 +13,14 @@ describe('validateEnvironment', () => {
   it('applies defaults and accepts disabled optional integrations', () => {
     expect(validateEnvironment(valid)).toMatchObject({
       ...valid,
+      NODE_ENV: 'development',
       PORT: 3000,
       FILE_MAX_SIZE_BYTES: 10485760,
+      TRUST_PROXY_HOPS: 0,
+      MONGO_SERVER_SELECTION_TIMEOUT_MS: 10000,
+      MONGO_MAX_POOL_SIZE: 20,
+      MONGO_RETRY_ATTEMPTS: 5,
+      MONGO_RETRY_DELAY_MS: 3000,
     });
   });
 
@@ -30,6 +36,16 @@ describe('validateEnvironment', () => {
     [{ ...valid, SMTP_USER: 'user' }, 'SMTP_PASSWORD'],
     [{ ...valid, FILE_MAX_SIZE_BYTES: '0' }, 'FILE_MAX_SIZE_BYTES'],
     [{ ...valid, FILE_MAX_SIZE_BYTES: '104857601' }, 'FILE_MAX_SIZE_BYTES'],
+    [{ ...valid, NODE_ENV: 'staging' }, 'NODE_ENV'],
+    [{ ...valid, TRUST_PROXY_HOPS: '11' }, 'TRUST_PROXY_HOPS'],
+    [
+      { ...valid, MONGO_SERVER_SELECTION_TIMEOUT_MS: '999' },
+      'MONGO_SERVER_SELECTION_TIMEOUT_MS',
+    ],
+    [{ ...valid, MONGO_MAX_POOL_SIZE: '0' }, 'MONGO_MAX_POOL_SIZE'],
+    [{ ...valid, MONGO_RETRY_ATTEMPTS: '0' }, 'MONGO_RETRY_ATTEMPTS'],
+    [{ ...valid, MONGO_RETRY_DELAY_MS: '99' }, 'MONGO_RETRY_DELAY_MS'],
+    [{ ...valid, CORS_ORIGIN: 'http://remote.test' }, 'CORS_ORIGIN'],
     [
       { ...valid, ACCOUNT_ACTIVATION_URL: 'http://client.test' },
       'ACCOUNT_ACTIVATION_URL',
@@ -56,5 +72,17 @@ describe('validateEnvironment', () => {
         SMTP_PASSWORD: 'password',
       }),
     ).toMatchObject({ SMTP_PORT: 465, SMTP_SECURE: true });
+  });
+
+  it('requires HTTPS for configured OAuth URLs outside localhost', () => {
+    expect(() =>
+      validateEnvironment({
+        ...valid,
+        GOOGLE_CLIENT_ID: 'client',
+        GOOGLE_CLIENT_SECRET: 'secret',
+        GOOGLE_CALLBACK_URL: 'http://api.example.test/auth/google/callback',
+        FRONT_URI: 'https://client.example.test',
+      }),
+    ).toThrow('GOOGLE_CALLBACK_URL');
   });
 });

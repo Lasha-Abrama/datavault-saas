@@ -11,6 +11,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { FilesModule } from './files/files.module';
 import { StatisticsModule } from './statistics/statistics.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -19,6 +20,13 @@ import { StatisticsModule } from './statistics/statistics.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         uri: config.getOrThrow<string>('MONGO_URI'),
+        serverSelectionTimeoutMS: config.getOrThrow<number>(
+          'MONGO_SERVER_SELECTION_TIMEOUT_MS',
+        ),
+        maxPoolSize: config.getOrThrow<number>('MONGO_MAX_POOL_SIZE'),
+        retryAttempts: config.getOrThrow<number>('MONGO_RETRY_ATTEMPTS'),
+        retryDelay: config.getOrThrow<number>('MONGO_RETRY_DELAY_MS'),
+        autoIndex: true,
       }),
     }),
     UsersModule,
@@ -30,6 +38,7 @@ import { StatisticsModule } from './statistics/statistics.module';
     InvitationsModule,
     FilesModule,
     StatisticsModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

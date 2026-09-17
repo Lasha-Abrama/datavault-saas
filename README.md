@@ -2,16 +2,9 @@
 
 NestJS backend for DataVault with company-based tenant isolation, internal plan/subscription entitlements, email onboarding, and private CSV/XLS/XLSX file storage. External payment integration has not been added.
 
-## Requirements
+## Local setup
 
-- Node.js 24 (see `.nvmrc`; supported range is declared in `package.json`)
-- npm
-- A replica-set-capable MongoDB deployment; onboarding and upload accounting use transactions
-- An SMTP server for account-activation and employee-invitation email
-- Optional Google OAuth credentials
-- AWS S3 configuration for file operations
-
-## Setup
+Use Node.js 24 (see `.nvmrc`) and npm:
 
 ```bash
 npm ci
@@ -21,7 +14,111 @@ npm run start:dev
 
 `MONGO_URI`, a random `JWT_SECRET` of at least 32 characters, `ACCOUNT_ACTIVATION_URL`, `EMPLOYEE_INVITATION_URL`, and the required SMTP settings must be configured. The two application URLs should point to frontend pages that read the token and call `/auth/verify-account` or `/invitations/accept`, respectively. The application validates configuration during startup and requires HTTPS for non-local application URLs. Every supported setting is documented in `.env.example`.
 
-The built-in public-auth limiter is process-local. A horizontally scaled deployment should configure a shared throttler store and a trusted proxy strategy appropriate to its hosting platform.
+## Production configuration
+
+Set configuration in the deployment environment or secret manager; never bake `.env` files into an image. The repository ignores all `.env*` files except the placeholder-only `.env.example`.
+
+### MongoDB
+
+| Variable                            | Required | Purpose                                                                                                                         |
+| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `MONGO_URI`                         | Yes      | MongoDB Atlas or another replica-set/sharded-cluster URI. Include the database name and TLS options required by the deployment. |
+| `MONGO_SERVER_SELECTION_TIMEOUT_MS` | No       | Driver server-selection timeout; defaults to 10,000 ms.                                                                         |
+| `MONGO_MAX_POOL_SIZE`               | No       | Per-process connection-pool maximum; defaults to 20. Size the aggregate across all replicas.                                    |
+| `MONGO_RETRY_ATTEMPTS`              | No       | Nest startup connection attempts; defaults to 5.                                                                                |
+| `MONGO_RETRY_DELAY_MS`              | No       | Delay between startup attempts; defaults to 3,000 ms.                                                                           |
+
+Transactions are mandatory. Company registration, invitation acceptance, employee-seat reservation, plan changes, and upload quota/metadata accounting rely on multi-document transactions. A standalone MongoDB is unsupported. Startup executes MongoDB's `hello` command and refuses to serve traffic unless logical sessions and either a replica set or sharded cluster are present. Initial connection failures also stop startup after the configured retries; operations never fall back to non-transactional writes.
+
+The fresh application keeps Mongoose automatic index creation enabled so required unique, partial, TTL, and tenant query indexes are created from the schemas. The database identity therefore needs normal application read/write and index-creation permissions. Review index creation before adding this application to a populated legacy database; no migration is required for a fresh deployment.
+
+### JWT and application
+
+| Variable                  | Required            | Purpose                                                                                                               |
+| ------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `JWT_SECRET`              | Yes                 | Random signing secret of at least 32 characters. Store only in a secret manager.                                      |
+| `NODE_ENV`                | Production          | Set to `production`; accepted values are `development`, `test`, and `production`.                                     |
+| `PORT`                    | No                  | Listening port supplied by the platform; defaults to 3000. The process binds `0.0.0.0`.                               |
+| `TRUST_PROXY_HOPS`        | No                  | Exact number of trusted reverse-proxy hops; defaults to 0. Configure only after confirming the provider network path. |
+| `CORS_ORIGIN`             | Browser deployments | Comma-separated explicit frontend HTTPS origins. Blank disables CORS; wildcards and paths are rejected.               |
+| `ACCOUNT_ACTIVATION_URL`  | Yes                 | HTTPS frontend URL that consumes the company activation token.                                                        |
+| `EMPLOYEE_INVITATION_URL` | Yes                 | HTTPS frontend URL that consumes the employee invitation token.                                                       |
+
+JWTs use HS256 with a one-hour lifetime and an explicit algorithm allowlist. Helmet supplies standard security headers. DTO validation strips no unknown values silently: unknown fields are rejected. CORS does not allow credentials and never defaults to a wildcard. Public sign-in, registration, verification, resend, and invitation acceptance routes are rate-limited in memory. A horizontally scaled deployment should replace that limiter store with a shared implementation and set `TRUST_PROXY_HOPS` to the verified proxy chain.
+
+### Email/SMTP
+
+| Variable                     | Required           | Purpose                                                            |
+| ---------------------------- | ------------------ | ------------------------------------------------------------------ |
+| `SMTP_HOST`                  | Yes                | SMTP hostname or IP address.                                       |
+| `SMTP_PORT`                  | No                 | Defaults to 587, or 465 when implicit TLS is enabled.              |
+| `SMTP_SECURE`                | No                 | `true` for implicit TLS, normally port 465; defaults to `false`.   |
+| `SMTP_REQUIRE_TLS`           | No                 | Requires STARTTLS when not using implicit TLS; defaults to `true`. |
+| `SMTP_FROM`                  | Yes                | Verified sender email address.                                     |
+| `SMTP_USER`, `SMTP_PASSWORD` | Provider-dependent | Authentication pair; configure both or neither.                    |
+
+SMTP connection, greeting, and socket timeouts are bounded. Nodemailer file and URL access are disabled. Activation and invitation URLs must use HTTPS outside localhost. Before launch, verify sender-domain authorization, outbound network access, link routing, and delivery with the real provider.
+
+### AWS S3 and files
+
+| Variable                                     | Required                            | Purpose                                                                              |
+| -------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------ |
+| `AWS_BUCKET_NAME`                            | File operations                     | Private S3 bucket.                                                                   |
+| `AWS_REGION`                                 | File operations                     | Region containing the bucket.                                                        |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | No                                  | Explicit credential pair. Prefer the platform IAM role/default AWS credential chain. |
+| `AWS_SESSION_TOKEN`                          | Temporary explicit credentials only | Session token; requires the explicit credential pair.                                |
+| `FILE_MAX_SIZE_BYTES`                        | No                                  | Buffered multipart limit; defaults to 10 MiB and is capped at 100 MiB.               |
+
+Keep S3 Block Public Access enabled and enable bucket default encryption. The runtime principal needs only `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on `arn:aws:s3:::BUCKET/companies/*`; the application does not list the bucket, set public ACLs, or use permanent public URLs. Align provider/proxy body limits and memory with `FILE_MAX_SIZE_BYTES`.
+
+### Optional Google OAuth
+
+| Variable                                   | Required together | Purpose                                                           |
+| ------------------------------------------ | ----------------- | ----------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Yes, when enabled | OAuth client credentials.                                         |
+| `GOOGLE_CALLBACK_URL`                      | Yes, when enabled | HTTPS backend `/auth/google/callback` URL registered with Google. |
+| `FRONT_URI`                                | Yes, when enabled | HTTPS frontend origin receiving the completed sign-in redirect.   |
+
+Leaving all four Google variables blank disables Google OAuth.
+
+## Health and process lifecycle
+
+- `GET /health/live` reports process liveness without contacting dependencies.
+- `GET /health/ready` pings MongoDB and returns HTTP 503 with a sanitized response while MongoDB is unavailable.
+- Nest shutdown hooks close managed resources on termination signals.
+- Health routes reveal no credentials, hosts, stack traces, or application data.
+
+Application logging does not log request bodies, passwords, JWTs, raw verification/invitation tokens, SMTP credentials, AWS credentials, or uploaded file buffers. Infrastructure adapters emit only generic failure messages; client-facing dependency failures are sanitized.
+
+## Production build and start
+
+For a direct Node deployment:
+
+```bash
+npm ci
+npm run build
+npm run start:prod
+```
+
+`start:prod` executes `node dist/main`. The included multi-stage Dockerfile installs from the lockfile, builds the application, prunes development dependencies, and runs as the unprivileged `node` user:
+
+```bash
+docker build -t datavault-saas .
+docker run --env-file .env -p 3000:3000 datavault-saas
+```
+
+The image contains no `.env`, source tests, Git metadata, or development dependencies.
+
+Deployment checklist:
+
+1. Provision an Atlas/replica-set database and allow the runtime network and database identity.
+2. Supply secrets and configuration through the provider's secret/environment facility.
+3. Configure explicit HTTPS CORS and activation/invitation frontend URLs.
+4. Attach a least-privilege S3 role and verify private upload, download, deletion, and failed-upload cleanup.
+5. Verify SMTP TLS, sender identity, activation delivery, and invitation delivery.
+6. Configure the platform health checks: liveness for process restart decisions and readiness for traffic routing.
+7. Confirm proxy hops, request-size limits, runtime memory, Mongo pool totals, and graceful termination timeouts.
+8. Run `npm ci`, build, tests, and `npm audit` from the exact revision being deployed.
 
 ## Tenant model
 
@@ -83,6 +180,7 @@ Deletion removes the S3 object first, then its tenant-scoped metadata. S3 failur
 - `src/files`: tenant-owned metadata, multipart validation, upload compensation, private downloads, and deletion policy
 - `src/aws-s3`: provider-neutral object-storage contract and private S3 adapter
 - `src/config`: startup validation and shared HTTP configuration
+- `src/health`: public liveness/readiness probes and MongoDB transaction-capability startup check
 - `src/statistics`: bonus tenant dashboard composed from existing authoritative domain data
 
 ## Commands
@@ -97,6 +195,8 @@ npm run start:prod
 
 ## Current API
 
+- `GET /health/live` — process liveness
+- `GET /health/ready` — MongoDB readiness
 - `POST /auth/sign-up` — creates a pending company, optional owner profile, Free subscription, and activation token; requires `companyName`, `email`, `password`, `country`, and `industry`
 - `POST /auth/verify-account` — consumes a single-use activation token
 - `POST /auth/resend-verification` — generic, cooldown-protected resend response

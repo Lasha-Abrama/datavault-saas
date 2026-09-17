@@ -112,6 +112,8 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .overrideProvider(getConnectionToken())
       .useValue({
         close: jest.fn(),
+        readyState: 1,
+        db: { admin: () => ({ ping: jest.fn().mockResolvedValue({ ok: 1 }) }) },
         transaction: jest.fn((work: (session: object) => unknown) => work({})),
       })
       .overrideProvider(getModelToken('user'))
@@ -162,6 +164,20 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
   });
 
   afterAll(() => app?.close());
+
+  it('exposes public process and MongoDB health checks with security headers', async () => {
+    await request(app.getHttpServer())
+      .get('/health/live')
+      .expect('X-Content-Type-Options', 'nosniff')
+      .expect('X-Frame-Options', 'SAMEORIGIN')
+      .expect(200, { status: 'ok' });
+    await request(app.getHttpServer())
+      .get('/health/ready')
+      .expect(200, {
+        status: 'ok',
+        dependencies: { mongodb: 'up' },
+      });
+  });
 
   it('requires a company name during sign-up', () =>
     request(app.getHttpServer())

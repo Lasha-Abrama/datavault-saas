@@ -26,6 +26,24 @@ export function validateEnvironment(config: Record<string, unknown>) {
   required('MONGO_URI');
   if (!/^mongodb(?:\+srv)?:\/\//.test(text('MONGO_URI')))
     throw new Error('MONGO_URI must be a MongoDB connection URI');
+  const nodeEnv = text('NODE_ENV') || 'development';
+  if (!['development', 'test', 'production'].includes(nodeEnv))
+    throw new Error('NODE_ENV must be development, test, or production');
+  result.NODE_ENV = nodeEnv;
+  result.MONGO_SERVER_SELECTION_TIMEOUT_MS = integer(
+    'MONGO_SERVER_SELECTION_TIMEOUT_MS',
+    10_000,
+    1_000,
+    120_000,
+  );
+  result.MONGO_MAX_POOL_SIZE = integer('MONGO_MAX_POOL_SIZE', 20, 1, 200);
+  result.MONGO_RETRY_ATTEMPTS = integer('MONGO_RETRY_ATTEMPTS', 5, 1, 20);
+  result.MONGO_RETRY_DELAY_MS = integer(
+    'MONGO_RETRY_DELAY_MS',
+    3_000,
+    100,
+    30_000,
+  );
   required('JWT_SECRET');
   if (text('JWT_SECRET').length < 32)
     throw new Error('JWT_SECRET must contain at least 32 characters');
@@ -33,6 +51,7 @@ export function validateEnvironment(config: Record<string, unknown>) {
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)
     throw new Error('PORT must be an integer between 1 and 65535');
   result.PORT = Number(port);
+  result.TRUST_PROXY_HOPS = integer('TRUST_PROXY_HOPS', 0, 0, 10);
   const fileMaxSizeBytes = text('FILE_MAX_SIZE_BYTES') || '10485760';
   if (
     !/^\d+$/.test(fileMaxSizeBytes) ||
@@ -76,7 +95,9 @@ export function validateEnvironment(config: Record<string, unknown>) {
       .split(',')
       .map((value) => value.trim())) {
       // Validate each origin without exposing environment values in errors.
-      validateOrigin(origin);
+      const url = validateOrigin(origin);
+      if (url.protocol !== 'https:' && !isLocalhost(url.hostname))
+        throw new Error('CORS_ORIGIN must use HTTPS outside localhost');
     }
   }
   const googleKeys = [
@@ -89,6 +110,8 @@ export function validateEnvironment(config: Record<string, unknown>) {
     googleKeys.forEach(required);
     httpUrl('GOOGLE_CALLBACK_URL');
     httpUrl('FRONT_URI', true);
+    requireHttpsOutsideLocalhost('GOOGLE_CALLBACK_URL');
+    requireHttpsOutsideLocalhost('FRONT_URI');
   }
   const awsKeys = [
     'AWS_BUCKET_NAME',
@@ -119,12 +142,27 @@ export function validateEnvironment(config: Record<string, unknown>) {
     return value === 'true';
   }
 
+  function integer(
+    key: string,
+    defaultValue: number,
+    minimum: number,
+    maximum: number,
+  ) {
+    const value = text(key) || String(defaultValue);
+    if (
+      !/^\d+$/.test(value) ||
+      Number(value) < minimum ||
+      Number(value) > maximum
+    )
+      throw new Error(
+        `${key} must be an integer between ${minimum} and ${maximum}`,
+      );
+    return Number(value);
+  }
+
   function requireHttpsOutsideLocalhost(key: string) {
     const url = new URL(text(key));
-    if (
-      url.protocol !== 'https:' &&
-      !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
-    )
+    if (url.protocol !== 'https:' && !isLocalhost(url.hostname))
       throw new Error(`${key} must use HTTPS outside localhost`);
   }
 }
@@ -132,9 +170,19 @@ export function validateEnvironment(config: Record<string, unknown>) {
 function validateOrigin(origin: string) {
   try {
     const url = new URL(origin);
-    if (!['http:', 'https:'].includes(url.protocol) || url.origin !== origin)
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.origin !== origin ||
+      url.username ||
+      url.password
+    )
       throw new Error();
+    return url;
   } catch {
     throw new Error('CORS_ORIGIN must contain comma-separated HTTP(S) origins');
   }
+}
+
+function isLocalhost(hostname: string) {
+  return ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
 }
