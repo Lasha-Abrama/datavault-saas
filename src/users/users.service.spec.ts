@@ -214,6 +214,33 @@ describe('UsersService tenant boundaries', () => {
     expect(model.findOneAndDelete).toHaveBeenCalledWith({
       _id: memberId,
       companyId,
+      role: Role.COMPANY_MEMBER,
     });
+  });
+
+  it('serializes Stripe-mode employee deletion even while billing is suspended', async () => {
+    const session = {};
+    const subscriptions = {
+      paymentsEnabled: true,
+      acquireLock: jest.fn().mockResolvedValue({ paymentAccess: 'suspended' }),
+    };
+    const connection = {
+      transaction: jest.fn((work: (value: object) => Promise<unknown>) =>
+        work(session),
+      ),
+    };
+    const managedService = new UsersService(
+      model as never,
+      subscriptions as never,
+      connection as never,
+    );
+    model.findOne.mockResolvedValue(memberDocument);
+    model.findOneAndDelete.mockResolvedValue(memberDocument);
+    await managedService.deleteUser(owner, memberId);
+    expect(subscriptions.acquireLock).toHaveBeenCalledWith(companyId, session);
+    expect(model.findOneAndDelete).toHaveBeenCalledWith(
+      { _id: memberId, companyId, role: Role.COMPANY_MEMBER },
+      { session },
+    );
   });
 });

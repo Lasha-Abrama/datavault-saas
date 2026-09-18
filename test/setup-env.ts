@@ -1,5 +1,6 @@
 process.env.MONGO_URI = 'mongodb://localhost:27017/datavault-test';
 process.env.NODE_ENV = 'test';
+process.env.STRIPE_ENABLED = 'false';
 process.env.JWT_SECRET = 'a-secure-test-secret-with-32-characters';
 process.env.ACCOUNT_ACTIVATION_URL =
   'https://client.example.test/auth/activate';

@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
@@ -18,6 +19,7 @@ import { billingPeriod } from './billing-period';
 import { SubscriptionPeriod } from './entities/subscription-period.entity';
 import { Subscription } from './entities/subscription.entity';
 import { BillingService } from './billing.service';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class SubscriptionsService {
@@ -32,6 +34,7 @@ export class SubscriptionsService {
     private readonly plansService: PlansService,
     private readonly billingService: BillingService,
     @InjectConnection() private readonly connection: Connection,
+    @Optional() private readonly payments?: PaymentsService,
   ) {}
 
   async initializeFree(
@@ -104,11 +107,17 @@ export class SubscriptionsService {
   async changePlan(actor: AuthenticatedUser, planCode: PlanCode) {
     if (actor.role !== Role.COMPANY_OWNER)
       throw new ForbiddenException('Company owner access is required');
+    if (this.payments?.enabled)
+      return this.payments.changePlan(actor, planCode);
     const plan = this.plansService.findOne(planCode);
     const changedAt = new Date();
 
     await this.connection.transaction(async (session) => {
       const subscription = await this.acquireLock(actor.companyId, session);
+      if (subscription.stripeManaged)
+        throw new ForbiddenException(
+          'Stripe-managed plans require the payment integration',
+        );
       const employeeCount = await this.userModel.countDocuments(
         { companyId: actor.companyId, role: Role.COMPANY_MEMBER },
         { session },
@@ -160,5 +169,27 @@ export class SubscriptionsService {
     if (!subscription)
       throw new NotFoundException('Company subscription not found');
     return subscription;
+  }
+
+  get paymentsEnabled() {
+    return this.payments?.enabled ?? false;
+  }
+
+  async enqueueOverage(
+    subscription: Subscription,
+    period: { startsAt: Date; endsAt: Date },
+    sequence: number,
+    cents: number,
+    at: Date,
+    session: ClientSession,
+  ) {
+    await this.payments?.enqueueOverage(
+      subscription,
+      period,
+      sequence,
+      cents,
+      at,
+      session,
+    );
   }
 }

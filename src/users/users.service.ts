@@ -3,10 +3,11 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { User } from './entities/user.entity';
 import { QueryParams } from './dto/query-params.dto';
@@ -14,10 +15,15 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { Role } from '../enums/roles.enum';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel('user') private readonly userModel: Model<User>) {}
+  constructor(
+    @InjectModel('user') private readonly userModel: Model<User>,
+    @Optional() private readonly subscriptions?: SubscriptionsService,
+    @Optional() @InjectConnection() private readonly connection?: Connection,
+  ) {}
 
   async findAll(actor: AuthenticatedUser, { page, take }: QueryParams) {
     this.requireOwner(actor);
@@ -98,10 +104,20 @@ export class UsersService {
     const target = await this.findOne(actor, targetUserId);
     if (target.role === Role.COMPANY_OWNER)
       throw new BadRequestException('The company owner cannot be deleted');
-    const user = await this.userModel.findOneAndDelete({
+    const filter = {
       _id: targetUserId,
       companyId: actor.companyId,
-    });
+      role: Role.COMPANY_MEMBER,
+    };
+    // Serialize employee deletions with acceptance, plan changes and invoice
+    // seat snapshots. Deletion remains possible while payments are suspended.
+    const user =
+      this.subscriptions?.paymentsEnabled && this.connection
+        ? await this.connection.transaction(async (session) => {
+            await this.subscriptions!.acquireLock(actor.companyId, session);
+            return this.userModel.findOneAndDelete(filter, { session });
+          })
+        : await this.userModel.findOneAndDelete(filter);
     if (!user) throw new NotFoundException('User not found');
     return user;
   }

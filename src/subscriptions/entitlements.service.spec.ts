@@ -3,6 +3,7 @@ import { PLAN_CATALOG, PlanCode } from '../plans/plan.constants';
 import { EntitlementsService } from './entitlements.service';
 import { EntitlementDenialReason } from './subscription.constants';
 import { BillingService } from './billing.service';
+import { PaymentAccess } from '../payments/payment.constants';
 
 describe('EntitlementsService', () => {
   const companyId = 'company-id';
@@ -11,6 +12,8 @@ describe('EntitlementsService', () => {
   const subscriptionsService = {
     getSubscription: jest.fn(),
     acquireLock: jest.fn(),
+    paymentsEnabled: false,
+    enqueueOverage: jest.fn(),
   };
   const plansService = {
     findOne: jest.fn((code: PlanCode) => PLAN_CATALOG[code]),
@@ -37,6 +40,7 @@ describe('EntitlementsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    subscriptionsService.paymentsEnabled = false;
     subscriptionsService.getSubscription.mockResolvedValue({
       planCode: PlanCode.FREE,
       activatedAt,
@@ -213,5 +217,82 @@ describe('EntitlementsService', () => {
     await expect(
       service.recordFileUploads(companyId, 1.5),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('blocks uploads and onboarding for suspended managed payment state', async () => {
+    subscriptionsService.paymentsEnabled = true;
+    const managed = {
+      planCode: PlanCode.PREMIUM,
+      activatedAt,
+      stripeManaged: true,
+      paymentAccess: PaymentAccess.SUSPENDED,
+      stripeSyncedAt: new Date(),
+    };
+    subscriptionsService.getSubscription.mockResolvedValue(managed);
+    subscriptionsService.acquireLock.mockResolvedValue(managed);
+    await expect(service.checkFileUpload(companyId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(
+      service.assertEmployeeCapacity(companyId, session as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.recordFileUploads(companyId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(periodModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('reserves the stricter queued downgrade limits for both seats and files', async () => {
+    const queued = {
+      planCode: PlanCode.PREMIUM,
+      pendingPlanCode: PlanCode.BASIC,
+      activatedAt,
+    };
+    subscriptionsService.getSubscription.mockResolvedValue(queued);
+    subscriptionsService.acquireLock.mockResolvedValue(queued);
+    userModel.countDocuments.mockResolvedValue(9);
+    invitationModel.countDocuments.mockResolvedValue(1);
+    await expect(
+      service.assertEmployeeCapacity(companyId, session as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    periodModel.findOne.mockResolvedValue({ uploadedFiles: 100 });
+    await expect(service.checkFileUpload(companyId)).resolves.toMatchObject({
+      allowed: false,
+    });
+    await expect(service.recordFileUploads(companyId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(periodModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('enqueues only incremental overage inside the same successful-upload transaction', async () => {
+    subscriptionsService.paymentsEnabled = true;
+    const at = new Date('2026-01-21T00:00:00.000Z');
+    const managed = {
+      planCode: PlanCode.PREMIUM,
+      activatedAt,
+      stripeManaged: true,
+      paymentAccess: PaymentAccess.ACTIVE,
+      stripeSyncedAt: at,
+    };
+    subscriptionsService.acquireLock.mockResolvedValue(managed);
+    periodModel.findOne.mockResolvedValue({ uploadedFiles: 999 });
+    await service.recordFileUploads(companyId, 3, at);
+    expect(subscriptionsService.enqueueOverage).toHaveBeenCalledWith(
+      managed,
+      { startsAt: activatedAt, endsAt: new Date('2026-02-20T10:00:00.000Z') },
+      1002,
+      100,
+      at,
+      session,
+    );
+    subscriptionsService.enqueueOverage.mockRejectedValueOnce(
+      new Error('outbox persistence failed'),
+    );
+    periodModel.findOneAndUpdate.mockClear();
+    await expect(service.recordFileUploads(companyId, 3, at)).rejects.toThrow(
+      'outbox persistence failed',
+    );
+    expect(periodModel.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });

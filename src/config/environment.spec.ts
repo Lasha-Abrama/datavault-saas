@@ -86,3 +86,89 @@ describe('validateEnvironment', () => {
     ).toThrow('GOOGLE_CALLBACK_URL');
   });
 });
+
+describe('Stripe Test Mode environment validation', () => {
+  const stripe = {
+    ...valid,
+    STRIPE_ENABLED: 'true',
+    STRIPE_SECRET_KEY: 'sk_test_fixture',
+    STRIPE_WEBHOOK_SECRET: 'whsec_fixture',
+    STRIPE_BASIC_PRICE_ID: 'price_basic',
+    STRIPE_PREMIUM_PRICE_ID: 'price_premium',
+    STRIPE_OVERAGE_PRICE_ID: 'price_overage',
+    STRIPE_OVERAGE_METER_ID: 'mtr_fixture',
+    STRIPE_OVERAGE_EVENT_NAME: 'upload_overage',
+    STRIPE_PORTAL_CONFIGURATION_ID: 'bpc_fixture',
+    STRIPE_CHECKOUT_SUCCESS_URL: 'https://client.test/success',
+    STRIPE_CHECKOUT_CANCEL_URL: 'https://client.test/cancel',
+    STRIPE_PORTAL_RETURN_URL: 'https://client.test/billing',
+  };
+  it('defaults off and validates all enabled mapping/settings', () => {
+    expect(validateEnvironment(valid).STRIPE_ENABLED).toBe(false);
+    expect(validateEnvironment(stripe)).toMatchObject({
+      STRIPE_ENABLED: true,
+      STRIPE_SYNC_INTERVAL_MS: 30000,
+    });
+  });
+  it.each([
+    'mtr_123',
+    'mtr_fixture',
+    'mtr_test_61Q8nQMqIFK9fRQmr41CMAXJrFdZ5MnA',
+    'mtr_test_A1b2C3',
+  ])('accepts a supported meter ID format: %s', (meterId) => {
+    expect(
+      validateEnvironment({ ...stripe, STRIPE_OVERAGE_METER_ID: meterId }),
+    ).toMatchObject({ STRIPE_OVERAGE_METER_ID: meterId });
+  });
+  it.each([
+    '',
+    'mtr_',
+    'mtr_test_',
+    'mtr_test_...',
+    'mtr_test_test_A1b2C3',
+    'mtr_live_A1b2C3',
+    'mtr_sandbox_A1b2C3',
+    'mtr_test_A1_b2',
+    'mtr_test_A1-b2',
+    'mtr_test_A1 b2',
+    ' mtr_test_A1b2C3',
+    'mtr_test_A1b2C3 ',
+    'MTR_test_A1b2C3',
+    'price_A1b2C3',
+    'mtr_REPLACE_ME',
+    'mtr_test_REPLACE_ME',
+  ])('rejects malformed or example placeholder meter IDs: %s', (meterId) => {
+    expect(() =>
+      validateEnvironment({ ...stripe, STRIPE_OVERAGE_METER_ID: meterId }),
+    ).toThrow('STRIPE_OVERAGE_METER_ID');
+  });
+  it.each([
+    ['STRIPE_SECRET_KEY', 'sk_live_fixture'],
+    ['STRIPE_WEBHOOK_SECRET', ''],
+    ['STRIPE_BASIC_PRICE_ID', 'invalid'],
+    ['STRIPE_OVERAGE_METER_ID', 'invalid'],
+    ['STRIPE_OVERAGE_EVENT_NAME', 'bad-event'],
+    ['STRIPE_PORTAL_CONFIGURATION_ID', 'invalid'],
+    ['STRIPE_CHECKOUT_SUCCESS_URL', 'http://remote.test/success'],
+    ['STRIPE_CHECKOUT_CANCEL_URL', 'https://user:password@client.test/cancel'],
+    ['STRIPE_PORTAL_RETURN_URL', 'ftp://client.test/billing'],
+    ['STRIPE_SYNC_INTERVAL_MS', '9999'],
+  ])('rejects unsafe/missing %s without exposing its value', (key, value) => {
+    expect(() => validateEnvironment({ ...stripe, [key]: value })).toThrow(key);
+  });
+  it('rejects duplicate catalog mappings and production HTTP even on localhost', () => {
+    expect(() =>
+      validateEnvironment({
+        ...stripe,
+        STRIPE_PREMIUM_PRICE_ID: 'price_basic',
+      }),
+    ).toThrow('distinct');
+    expect(() =>
+      validateEnvironment({
+        ...stripe,
+        NODE_ENV: 'production',
+        STRIPE_CHECKOUT_SUCCESS_URL: 'http://localhost:3000/success',
+      }),
+    ).toThrow('HTTPS');
+  });
+});

@@ -72,6 +72,34 @@ describe('SubscriptionsService', () => {
     );
   });
 
+  it('routes legacy plan changes through Stripe in enabled mode instead of granting paid access', async () => {
+    const payments = {
+      enabled: true,
+      changePlan: jest
+        .fn()
+        .mockResolvedValue({ pendingPlanCode: PlanCode.PREMIUM }),
+    };
+    const managed = new SubscriptionsService(
+      subscriptionModel as never,
+      periodModel as never,
+      userModel as never,
+      invitationModel as never,
+      plansService as never,
+      billingService,
+      connection as never,
+      payments as never,
+    );
+    await managed.changePlan(owner, PlanCode.PREMIUM);
+    expect(payments.changePlan).toHaveBeenCalledWith(owner, PlanCode.PREMIUM);
+    expect(subscriptionModel.findOneAndUpdate).not.toHaveBeenCalled();
+    await expect(
+      managed.changePlan(
+        { ...owner, role: Role.COMPANY_MEMBER },
+        PlanCode.PREMIUM,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('returns only the requested company state and its monthly estimate', async () => {
     await expect(
       service.getCurrent(

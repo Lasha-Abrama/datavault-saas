@@ -120,6 +120,72 @@ export function validateEnvironment(config: Record<string, unknown>) {
     'AWS_SECRET_ACCESS_KEY',
     'AWS_SESSION_TOKEN',
   ];
+  const stripeEnabled = boolean('STRIPE_ENABLED', false);
+  result.STRIPE_ENABLED = stripeEnabled;
+  result.STRIPE_SYNC_INTERVAL_MS = integer(
+    'STRIPE_SYNC_INTERVAL_MS',
+    30000,
+    10000,
+    300000,
+  );
+  if (stripeEnabled) {
+    const stripeKeys = [
+      'STRIPE_SECRET_KEY',
+      'STRIPE_WEBHOOK_SECRET',
+      'STRIPE_BASIC_PRICE_ID',
+      'STRIPE_PREMIUM_PRICE_ID',
+      'STRIPE_OVERAGE_PRICE_ID',
+      'STRIPE_OVERAGE_METER_ID',
+      'STRIPE_OVERAGE_EVENT_NAME',
+      'STRIPE_PORTAL_CONFIGURATION_ID',
+      'STRIPE_CHECKOUT_SUCCESS_URL',
+      'STRIPE_CHECKOUT_CANCEL_URL',
+      'STRIPE_PORTAL_RETURN_URL',
+    ];
+    stripeKeys.forEach(required);
+    if (!/^sk_test_[A-Za-z0-9]+$/.test(text('STRIPE_SECRET_KEY')))
+      throw new Error('STRIPE_SECRET_KEY must be a Test Mode secret key');
+    if (!/^whsec_[A-Za-z0-9]+$/.test(text('STRIPE_WEBHOOK_SECRET')))
+      throw new Error('STRIPE_WEBHOOK_SECRET must be a webhook signing secret');
+    for (const key of [
+      'STRIPE_BASIC_PRICE_ID',
+      'STRIPE_PREMIUM_PRICE_ID',
+      'STRIPE_OVERAGE_PRICE_ID',
+    ])
+      if (!/^price_[A-Za-z0-9]+$/.test(text(key)))
+        throw new Error(`${key} must be a Stripe Price ID`);
+    if (
+      new Set(
+        [
+          'STRIPE_BASIC_PRICE_ID',
+          'STRIPE_PREMIUM_PRICE_ID',
+          'STRIPE_OVERAGE_PRICE_ID',
+        ].map(text),
+      ).size !== 3
+    )
+      throw new Error('Stripe plan Price IDs must be distinct');
+    if (!/^mtr_(?:test_)?[A-Za-z0-9]+$/.test(text('STRIPE_OVERAGE_METER_ID')))
+      throw new Error('STRIPE_OVERAGE_METER_ID must be a Stripe meter ID');
+    if (!/^[A-Za-z0-9_]+$/.test(text('STRIPE_OVERAGE_EVENT_NAME')))
+      throw new Error(
+        'STRIPE_OVERAGE_EVENT_NAME must contain only letters, digits and underscores',
+      );
+    if (!/^bpc_[A-Za-z0-9]+$/.test(text('STRIPE_PORTAL_CONFIGURATION_ID')))
+      throw new Error(
+        'STRIPE_PORTAL_CONFIGURATION_ID must be a Stripe Portal configuration ID',
+      );
+    for (const key of [
+      'STRIPE_CHECKOUT_SUCCESS_URL',
+      'STRIPE_CHECKOUT_CANCEL_URL',
+      'STRIPE_PORTAL_RETURN_URL',
+    ]) {
+      httpUrl(key);
+      requireHttpsOutsideLocalhost(key);
+      const url = new URL(text(key));
+      if (nodeEnv === 'production' && url.protocol !== 'https:')
+        throw new Error(`${key} must use HTTPS in production`);
+    }
+  }
   if (awsKeys.some((key) => text(key))) {
     required('AWS_BUCKET_NAME');
     required('AWS_REGION');

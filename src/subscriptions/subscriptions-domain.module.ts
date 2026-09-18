@@ -8,10 +8,12 @@ import { subscriptionPeriodSchema } from './entities/subscription-period.entity'
 import { subscriptionSchema } from './entities/subscription.entity';
 import { SubscriptionsService } from './subscriptions.service';
 import { BillingService } from './billing.service';
+import { PaymentsDomainModule } from '../payments/payments-domain.module';
 
 @Module({
   imports: [
     PlansModule,
+    PaymentsDomainModule,
     MongooseModule.forFeature([
       { name: 'subscription', schema: subscriptionSchema },
       { name: 'subscriptionPeriod', schema: subscriptionPeriodSchema },

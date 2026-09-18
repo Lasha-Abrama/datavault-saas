@@ -17,6 +17,7 @@ import { EntitlementDenialReason } from './subscription.constants';
 import { SubscriptionPeriod } from './entities/subscription-period.entity';
 import { SubscriptionsService } from './subscriptions.service';
 import { BillingService } from './billing.service';
+import { assertPaymentAccess } from '../payments/payment-policy';
 
 @Injectable()
 export class EntitlementsService {
@@ -46,8 +47,22 @@ export class EntitlementsService {
       companyId,
       session,
     );
+    assertPaymentAccess(
+      subscription,
+      this.subscriptionsService.paymentsEnabled,
+      at,
+    );
     const plan = this.plansService.findOne(subscription.planCode);
-    if (plan.maxEmployees === null) return;
+    const target = subscription.pendingPlanCode
+      ? this.plansService.findOne(subscription.pendingPlanCode)
+      : plan;
+    const limit =
+      plan.maxEmployees === null
+        ? target.maxEmployees
+        : target.maxEmployees === null
+          ? plan.maxEmployees
+          : Math.min(plan.maxEmployees, target.maxEmployees);
+    if (limit === null) return;
     const employeeCount = await this.userModel.countDocuments(
       { companyId, role: Role.COMPANY_MEMBER },
       { session },
@@ -60,14 +75,11 @@ export class EntitlementsService {
       },
       { session },
     );
-    if (
-      employeeCount + pendingInvitationCount + additionalSeats >
-      plan.maxEmployees
-    )
+    if (employeeCount + pendingInvitationCount + additionalSeats > limit)
       throw new ForbiddenException({
         message: `The ${plan.name} plan employee limit has been reached`,
         reason: EntitlementDenialReason.EMPLOYEE_LIMIT_REACHED,
-        limit: plan.maxEmployees,
+        limit,
         employees: employeeCount,
         pendingInvitations: pendingInvitationCount,
       });
@@ -77,7 +89,15 @@ export class EntitlementsService {
     this.validateQuantity(quantity);
     const subscription =
       await this.subscriptionsService.getSubscription(companyId);
+    assertPaymentAccess(
+      subscription,
+      this.subscriptionsService.paymentsEnabled,
+      at,
+    );
     const plan = this.plansService.findOne(subscription.planCode);
+    const target = subscription.pendingPlanCode
+      ? this.plansService.findOne(subscription.pendingPlanCode)
+      : plan;
     const period = billingPeriod(subscription.activatedAt, at);
     const usage = await this.periodModel.findOne({
       companyId,
@@ -89,7 +109,10 @@ export class EntitlementsService {
       0,
       resultingFiles - plan.includedFilesPerMonth,
     );
-    const allowed = plan.extraFilePriceCents !== null || excessFiles === 0;
+    const allowed =
+      (plan.extraFilePriceCents !== null || excessFiles === 0) &&
+      (target.extraFilePriceCents !== null ||
+        resultingFiles <= target.includedFilesPerMonth);
 
     return {
       allowed,
@@ -146,7 +169,15 @@ export class EntitlementsService {
       companyId,
       session,
     );
+    assertPaymentAccess(
+      subscription,
+      this.subscriptionsService.paymentsEnabled,
+      at,
+    );
     const plan = this.plansService.findOne(subscription.planCode);
+    const target = subscription.pendingPlanCode
+      ? this.plansService.findOne(subscription.pendingPlanCode)
+      : plan;
     const period = billingPeriod(subscription.activatedAt, at);
     const usage = await this.periodModel.findOne(
       { companyId, startsAt: period.startsAt },
@@ -159,7 +190,11 @@ export class EntitlementsService {
       0,
       resultingFiles - plan.includedFilesPerMonth,
     );
-    if (plan.extraFilePriceCents === null && resultingExcess > 0)
+    if (
+      (plan.extraFilePriceCents === null && resultingExcess > 0) ||
+      (target.extraFilePriceCents === null &&
+        resultingFiles > target.includedFilesPerMonth)
+    )
       throw new ForbiddenException({
         message: `The ${plan.name} monthly file limit has been reached`,
         reason: EntitlementDenialReason.FILE_LIMIT_REACHED,
@@ -170,6 +205,16 @@ export class EntitlementsService {
         plan,
         uploadedFiles,
         resultingFiles,
+      );
+
+    if (subscription.stripeManaged)
+      await this.subscriptionsService.enqueueOverage(
+        subscription,
+        period,
+        resultingFiles,
+        additionalOverageCents,
+        at,
+        session,
       );
 
     return this.periodModel.findOneAndUpdate(
