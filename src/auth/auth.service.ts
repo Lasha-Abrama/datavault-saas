@@ -21,6 +21,7 @@ import {
 import { Role } from '../enums/roles.enum';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CompanyVerificationService } from './company-verification.service';
+import { CompanyPlatformStatus } from '../companies/platform-status';
 
 @Injectable()
 export class AuthService {
@@ -127,6 +128,8 @@ export class AuthService {
       activatedAt: { $ne: null },
     });
     if (!company) throw new UnauthorizedException('Account is not activated');
+    if (company.platformStatus === CompanyPlatformStatus.SUSPENDED)
+      throw new UnauthorizedException('Account is unavailable');
     return this.jwtService.signAsync({ id: user._id.toString() });
   }
 }

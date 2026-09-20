@@ -12,6 +12,7 @@ import { AuthenticatedRequest, TokenPayload } from '../auth/auth.types';
 import { Role } from '../enums/roles.enum';
 import { User } from '../users/entities/user.entity';
 import { Company } from '../companies/entities/company.entity';
+import { CompanyPlatformStatus } from '../companies/platform-status';
 
 @Injectable()
 export class IsAuthGuard implements CanActivate {
@@ -28,7 +29,8 @@ export class IsAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or missing bearer token');
     try {
       const payload = await this.jwtService.verifyAsync<TokenPayload>(match[1]);
-      if (!isMongoId(payload.id)) throw new Error('Invalid token payload');
+      if (!isMongoId(payload.id) || payload.type !== undefined)
+        throw new Error('Invalid token payload');
       const user = await this.userModel.findById(payload.id);
       if (
         !user ||
@@ -40,7 +42,11 @@ export class IsAuthGuard implements CanActivate {
         _id: user.companyId,
         activatedAt: { $ne: null },
       });
-      if (!company) throw new Error('Inactive company');
+      if (
+        !company ||
+        company.platformStatus === CompanyPlatformStatus.SUSPENDED
+      )
+        throw new Error('Unavailable company');
       request.auth = {
         id: user._id.toString(),
         companyId: user.companyId.toString(),

@@ -77,6 +77,7 @@ export class CompanyFile {
 }
 
 export const companyFileSchema = SchemaFactory.createForClass(CompanyFile);
+companyFileSchema.index({ createdAt: -1, _id: -1 });
 companyFileSchema.index({ companyId: 1, createdAt: -1, _id: -1 });
 companyFileSchema.index({
   companyId: 1,

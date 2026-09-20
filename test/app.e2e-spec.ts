@@ -152,6 +152,10 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
       .overrideProvider(getModelToken('companyFile'))
       .useValue({})
+      .overrideProvider(getModelToken('platformAdmin'))
+      .useValue({})
+      .overrideProvider(getModelToken('adminAudit'))
+      .useValue({})
       .compile();
     app = moduleFixture.createNestApplication();
     configureApp(app);

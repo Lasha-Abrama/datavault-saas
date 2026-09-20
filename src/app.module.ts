@@ -13,6 +13,7 @@ import { FilesModule } from './files/files.module';
 import { StatisticsModule } from './statistics/statistics.module';
 import { HealthModule } from './health/health.module';
 import { PaymentsModule } from './payments/payments.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { PaymentsModule } from './payments/payments.module';
     StatisticsModule,
     HealthModule,
     PaymentsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

@@ -27,3 +27,4 @@ export class SubscriptionPeriod {
 export const subscriptionPeriodSchema =
   SchemaFactory.createForClass(SubscriptionPeriod);
 subscriptionPeriodSchema.index({ companyId: 1, startsAt: 1 }, { unique: true });
+subscriptionPeriodSchema.index({ endsAt: 1, startsAt: 1 });

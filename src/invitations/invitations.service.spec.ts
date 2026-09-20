@@ -10,6 +10,7 @@ import { createHash } from 'crypto';
 import { Types } from 'mongoose';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { Role } from '../enums/roles.enum';
+import { CompanyPlatformStatus } from '../companies/platform-status';
 import {
   InvitationStatus,
   EmployeeInvitation,
@@ -228,6 +229,22 @@ describe('InvitationsService', () => {
         now,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rejects public acceptance for a suspended company without consuming the invitation or capacity', async () => {
+    invitationModel.findOne.mockResolvedValue(invitation);
+    companyModel.findOne.mockResolvedValue({
+      platformStatus: CompanyPlatformStatus.SUSPENDED,
+    });
+    await expect(
+      service.accept(
+        { token: 'a'.repeat(43), fullName: 'Employee', password: 'password' },
+        now,
+      ),
+    ).rejects.toThrow('Invitation is unavailable');
+    expect(entitlements.assertEmployeeCapacity).not.toHaveBeenCalled();
+    expect(invitationModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(userModel.create).not.toHaveBeenCalled();
   });
 
   it('lists only live pending invitations scoped to the owner company', async () => {

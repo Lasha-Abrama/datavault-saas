@@ -13,6 +13,7 @@ import { createHash, randomBytes } from 'crypto';
 import { ClientSession, Connection, Model } from 'mongoose';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { Company } from '../companies/entities/company.entity';
+import { CompanyPlatformStatus } from '../companies/platform-status';
 import { EmailService } from '../email/email.service';
 import { Role } from '../enums/roles.enum';
 import { EntitlementsService } from '../subscriptions/entitlements.service';
@@ -73,7 +74,10 @@ export class InvitationsService {
           null,
           { session },
         );
-        if (!company)
+        if (
+          !company ||
+          company.platformStatus === CompanyPlatformStatus.SUSPENDED
+        )
           throw new ForbiddenException('An activated company is required');
 
         const [invitation] = await this.invitationModel.create(
@@ -238,6 +242,17 @@ export class InvitationsService {
         );
         if (!invitation)
           throw new BadRequestException('Invitation is invalid or expired');
+
+        const company = await this.companyModel.findOne(
+          { _id: invitation.companyId, activatedAt: { $ne: null } },
+          null,
+          { session },
+        );
+        if (
+          !company ||
+          company.platformStatus === CompanyPlatformStatus.SUSPENDED
+        )
+          throw new BadRequestException('Invitation is unavailable');
 
         await this.entitlementsService.assertEmployeeCapacity(
           invitation.companyId.toString(),

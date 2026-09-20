@@ -1,5 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { isISO31661Alpha2 } from 'class-validator';
+import { Schema as MongoSchema, Types } from 'mongoose';
+import {
+  CompanyPlatformReason,
+  CompanyPlatformStatus,
+} from '../platform-status';
 
 @Schema({ timestamps: true })
 export class Company {
@@ -36,6 +41,29 @@ export class Company {
 
   @Prop({ type: Date, default: null })
   activatedAt: Date | null;
+
+  @Prop({
+    type: String,
+    enum: CompanyPlatformStatus,
+    default: CompanyPlatformStatus.ACTIVE,
+  })
+  platformStatus: CompanyPlatformStatus;
+
+  @Prop({ type: String, enum: CompanyPlatformReason, select: false })
+  platformStatusReason?: CompanyPlatformReason;
+
+  @Prop({ type: Date, select: false })
+  platformStatusChangedAt?: Date;
+
+  @Prop({
+    type: MongoSchema.Types.ObjectId,
+    ref: 'platformAdmin',
+    select: false,
+  })
+  platformStatusChangedBy?: Types.ObjectId;
+
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export const companySchema = SchemaFactory.createForClass(Company);
@@ -43,3 +71,14 @@ companySchema.index(
   { name: 1 },
   { unique: true, collation: { locale: 'en', strength: 2 } },
 );
+companySchema.index({ platformStatus: 1, createdAt: -1, _id: -1 });
+companySchema.index({ activatedAt: 1, createdAt: -1, _id: -1 });
+companySchema.index({ createdAt: -1, _id: -1 });
+companySchema.set('toJSON', {
+  transform: (_doc, ret) => {
+    delete ret.platformStatusReason;
+    delete ret.platformStatusChangedAt;
+    delete ret.platformStatusChangedBy;
+    return ret;
+  },
+});

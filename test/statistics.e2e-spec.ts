@@ -254,6 +254,10 @@ describe('company statistics dashboard (e2e)', () => {
             ),
         ),
       })
+      .overrideProvider(getModelToken('platformAdmin'))
+      .useValue({})
+      .overrideProvider(getModelToken('adminAudit'))
+      .useValue({})
       .overrideProvider(getModelToken('companyVerification'))
       .useValue({})
       .overrideProvider(getModelToken('plan'))

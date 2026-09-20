@@ -33,10 +33,15 @@ export class User {
 
   @Prop({ type: String })
   avatar?: string;
+
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export const userSchema = SchemaFactory.createForClass(User);
 userSchema.index({ companyId: 1, role: 1 });
+userSchema.index({ createdAt: -1, _id: -1 });
+userSchema.index({ role: 1, createdAt: -1, _id: -1 });
 userSchema.set('toJSON', {
   transform: (_doc, ret) => {
     delete ret.password;
