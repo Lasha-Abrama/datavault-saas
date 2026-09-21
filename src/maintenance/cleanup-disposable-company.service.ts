@@ -18,6 +18,7 @@ export enum CleanupRefusalReason {
   INVITATIONS = 'invitation_or_inviter_references_exist',
   PERIODS = 'billing_period_records_exist',
   STRIPE = 'stripe_history_or_usage_exists',
+  AI_HISTORY = 'ai_conversation_or_usage_history_exists',
   VERIFICATION = 'verification_relationship_is_inconsistent',
 }
 
@@ -51,6 +52,9 @@ export type CleanupCollections = Record<
   | 'periods'
   | 'stripeEvents'
   | 'stripeUsage'
+  | 'aiConversations'
+  | 'aiMessages'
+  | 'aiUsage'
   | 'audits',
   mongo.Collection<StoredRecord>
 >;
@@ -279,6 +283,24 @@ export class DisposableCompanyCleanup {
       (await c.stripeUsage.countDocuments(tenant, { session, maxTimeMS: 5000 }))
     )
       refuse(CleanupRefusalReason.STRIPE);
+    const aiReferences = {
+      $or: [tenant, { userId: ownerRefs }],
+    };
+    if (
+      (await c.aiConversations.countDocuments(aiReferences, {
+        session,
+        maxTimeMS: 5000,
+      })) ||
+      (await c.aiMessages.countDocuments(aiReferences, {
+        session,
+        maxTimeMS: 5000,
+      })) ||
+      (await c.aiUsage.countDocuments(aiReferences, {
+        session,
+        maxTimeMS: 5000,
+      }))
+    )
+      refuse(CleanupRefusalReason.AI_HISTORY);
     if (
       await c.audits.countDocuments(
         {

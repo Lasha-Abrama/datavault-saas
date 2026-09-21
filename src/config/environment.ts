@@ -186,6 +186,106 @@ export function validateEnvironment(config: Record<string, unknown>) {
         throw new Error(`${key} must use HTTPS in production`);
     }
   }
+  const openRouterEnabled = boolean('OPENROUTER_ENABLED', false);
+  result.OPENROUTER_ENABLED = openRouterEnabled;
+  result.OPENROUTER_TIMEOUT_MS = integer(
+    'OPENROUTER_TIMEOUT_MS',
+    30_000,
+    5_000,
+    120_000,
+  );
+  result.OPENROUTER_MAX_OUTPUT_TOKENS = integer(
+    'OPENROUTER_MAX_OUTPUT_TOKENS',
+    1_000,
+    64,
+    8_192,
+  );
+  result.OPENROUTER_MAX_TOOL_ITERATIONS = integer(
+    'OPENROUTER_MAX_TOOL_ITERATIONS',
+    3,
+    1,
+    5,
+  );
+  result.OPENROUTER_REQUIRE_ZDR = boolean('OPENROUTER_REQUIRE_ZDR', false);
+  result.AI_MAX_MESSAGE_CHARS = integer(
+    'AI_MAX_MESSAGE_CHARS',
+    8_000,
+    100,
+    50_000,
+  );
+  result.AI_MAX_HISTORY_MESSAGES = integer(
+    'AI_MAX_HISTORY_MESSAGES',
+    20,
+    2,
+    50,
+  );
+  result.AI_MAX_CONTEXT_CHARS = integer(
+    'AI_MAX_CONTEXT_CHARS',
+    40_000,
+    1_000,
+    200_000,
+  );
+  result.AI_MAX_CONVERSATION_MESSAGES = integer(
+    'AI_MAX_CONVERSATION_MESSAGES',
+    100,
+    2,
+    200,
+  );
+  result.AI_MAX_CONVERSATIONS_PER_USER = integer(
+    'AI_MAX_CONVERSATIONS_PER_USER',
+    100,
+    1,
+    1_000,
+  );
+  result.AI_RATE_LIMIT_PER_MINUTE = integer(
+    'AI_RATE_LIMIT_PER_MINUTE',
+    10,
+    1,
+    120,
+  );
+  if (
+    Number(result.AI_MAX_HISTORY_MESSAGES) >
+    Number(result.AI_MAX_CONVERSATION_MESSAGES)
+  )
+    throw new Error(
+      'AI_MAX_HISTORY_MESSAGES cannot exceed AI_MAX_CONVERSATION_MESSAGES',
+    );
+  if (Number(result.AI_MAX_CONTEXT_CHARS) < Number(result.AI_MAX_MESSAGE_CHARS))
+    throw new Error(
+      'AI_MAX_CONTEXT_CHARS cannot be less than AI_MAX_MESSAGE_CHARS',
+    );
+  if (openRouterEnabled) {
+    required('OPENROUTER_API_KEY');
+    required('OPENROUTER_MODEL');
+    if (
+      !/^sk-or-v1-[A-Za-z0-9_-]{32,}$/.test(text('OPENROUTER_API_KEY')) ||
+      /REPLACE_ME/i.test(text('OPENROUTER_API_KEY'))
+    )
+      throw new Error('OPENROUTER_API_KEY must be an OpenRouter API key');
+    const modelPattern =
+      /^~?[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+    const primary = text('OPENROUTER_MODEL').trim();
+    if (!modelPattern.test(primary) || /REPLACE_ME/i.test(primary))
+      throw new Error('OPENROUTER_MODEL must be a valid OpenRouter model ID');
+    const fallbacks = text('OPENROUTER_FALLBACK_MODELS')
+      .split(',')
+      .map((model) => model.trim())
+      .filter(Boolean);
+    if (
+      fallbacks.length > 3 ||
+      fallbacks.some(
+        (model) => !modelPattern.test(model) || /REPLACE_ME/i.test(model),
+      ) ||
+      new Set([primary, ...fallbacks]).size !== 1 + fallbacks.length
+    )
+      throw new Error(
+        'OPENROUTER_FALLBACK_MODELS must contain up to three distinct OpenRouter model IDs',
+      );
+    result.OPENROUTER_MODEL = primary;
+    result.OPENROUTER_FALLBACK_MODELS = fallbacks;
+  } else {
+    result.OPENROUTER_FALLBACK_MODELS = [];
+  }
   if (awsKeys.some((key) => text(key))) {
     required('AWS_BUCKET_NAME');
     required('AWS_REGION');

@@ -34,5 +34,6 @@ import { userSchema } from '../users/entities/user.entity';
   ],
   controllers: [FilesController],
   providers: [FilesService],
+  exports: [FilesService],
 })
 export class FilesModule {}

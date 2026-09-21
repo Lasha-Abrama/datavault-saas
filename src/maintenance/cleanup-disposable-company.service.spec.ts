@@ -21,6 +21,9 @@ const keys: (keyof CleanupCollections)[] = [
   'periods',
   'stripeEvents',
   'stripeUsage',
+  'aiConversations',
+  'aiMessages',
+  'aiUsage',
   'audits',
 ];
 function match(row: StoredRecord, filter: Record<string, unknown>): boolean {
@@ -61,6 +64,9 @@ function fixture() {
     periods: [],
     stripeEvents: [],
     stripeUsage: [],
+    aiConversations: [],
+    aiMessages: [],
+    aiUsage: [],
     audits: [],
   };
   rows.companies.push({
@@ -286,6 +292,9 @@ describe('disposable unactivated company cleanup', () => {
       'periods',
       'stripeEvents',
       'stripeUsage',
+      'aiConversations',
+      'aiMessages',
+      'aiUsage',
       'audits',
     ] as const)
       expect(f.mocks[key].deleteMany).not.toHaveBeenCalled();
@@ -548,6 +557,28 @@ describe('disposable unactivated company cleanup', () => {
         });
       },
       CleanupRefusalReason.STRIPE,
+    ],
+    [
+      'AI conversation history',
+      (f) => {
+        f.rows.aiConversations.push({
+          _id: new Types.ObjectId(),
+          companyId: f.companyId,
+          userId: f.ownerId,
+        });
+      },
+      CleanupRefusalReason.AI_HISTORY,
+    ],
+    [
+      'cross-tenant AI owner reference',
+      (f) => {
+        f.rows.aiUsage.push({
+          _id: new Types.ObjectId(),
+          companyId: new Types.ObjectId(),
+          userId: f.ownerId,
+        });
+      },
+      CleanupRefusalReason.AI_HISTORY,
     ],
     [
       'company audit history',

@@ -75,6 +75,8 @@ function matches(row: Row, filter: Row): boolean {
       return (expected as Row[]).every((part) => matches(row, part));
     if (field === '$expr') return Boolean(expr(expected, row));
     const value = path(row, field);
+    if (Array.isArray(value) && !Array.isArray(expected))
+      return value.some((entry) => scalar(entry) === scalar(expected));
     if (expected instanceof RegExp)
       return typeof value === 'string' && expected.test(value);
     if (expected === null) return value == null;
@@ -241,10 +243,20 @@ class Query<T> implements PromiseLike<T> {
   option() {
     return this;
   }
-  sort() {
+  sort(specification: Row) {
+    if (Array.isArray(this.value))
+      this.value.sort((left, right) => {
+        for (const [field, direction] of Object.entries(specification)) {
+          const a = scalar(path(left as Row, field)) as string | number;
+          const b = scalar(path(right as Row, field)) as string | number;
+          if (a !== b) return (a < b ? -1 : 1) * Number(direction);
+        }
+        return 0;
+      });
     return this;
   }
-  skip() {
+  skip(n: number) {
+    if (Array.isArray(this.value)) this.value = this.value.slice(n) as T;
     return this;
   }
   limit(n: number) {
@@ -283,25 +295,51 @@ function model(rows: Row[], name: string, registry: Record<string, Row[]>) {
       (pipeline: Row[]) => new Query(aggregate(rows, pipeline, registry)),
     ),
     create: jest.fn((input: Row | Row[]) => {
+      const now = new Date();
       const created = (Array.isArray(input) ? input : [input]).map((row) => ({
-        _id: new Types.ObjectId(),
-        createdAt: new Date(),
+        _id: row._id ?? new Types.ObjectId(),
+        createdAt: row.createdAt ?? now,
+        updatedAt: row.updatedAt ?? now,
         ...row,
       }));
       rows.push(...created);
       return Promise.resolve(Array.isArray(input) ? created : created[0]);
     }),
     findOneAndUpdate: jest.fn(
-      (filter: Row, update: { $set?: Row; $inc?: Row }) => {
+      (filter: Row, update: { $set?: Row; $inc?: Row; $unset?: Row }) => {
         const row = rows.find((value) => matches(value, filter));
         if (row) {
           Object.assign(row, update.$set);
           for (const [key, value] of Object.entries(update.$inc ?? {}))
             row[key] = Number(row[key] ?? 0) + Number(value);
+          for (const key of Object.keys(update.$unset ?? {})) delete row[key];
+          row.updatedAt = new Date();
         }
         return new Query(row ?? null);
       },
     ),
+    updateOne: jest.fn((filter: Row, update: { $set?: Row; $unset?: Row }) => {
+      const row = rows.find((value) => matches(value, filter));
+      if (row) {
+        Object.assign(row, update.$set);
+        for (const key of Object.keys(update.$unset ?? {})) delete row[key];
+      }
+      return Promise.resolve({ modifiedCount: row ? 1 : 0 });
+    }),
+    deleteOne: jest.fn((filter: Row) => {
+      const index = rows.findIndex((value) => matches(value, filter));
+      if (index >= 0) rows.splice(index, 1);
+      return Promise.resolve({ deletedCount: index >= 0 ? 1 : 0 });
+    }),
+    findOneAndDelete: jest.fn((filter: Row) => {
+      const index = rows.findIndex((value) => matches(value, filter));
+      return Promise.resolve(index >= 0 ? rows.splice(index, 1)[0] : null);
+    }),
+    deleteMany: jest.fn((filter: Row) => {
+      const selected = rows.filter((value) => matches(value, filter));
+      for (const row of selected) rows.splice(rows.indexOf(row), 1);
+      return Promise.resolve({ deletedCount: selected.length });
+    }),
   };
 }
 
@@ -313,6 +351,18 @@ export async function adminFixture() {
     PLATFORM_ADMIN_BOOTSTRAP_EMAIL: '',
     PLATFORM_ADMIN_BOOTSTRAP_PASSWORD: '',
     PLATFORM_ADMIN_BOOTSTRAP_FULL_NAME: '',
+    OPENROUTER_ENABLED: false,
+    OPENROUTER_FALLBACK_MODELS: [],
+    OPENROUTER_MAX_OUTPUT_TOKENS: 1000,
+    OPENROUTER_MAX_TOOL_ITERATIONS: 3,
+    OPENROUTER_TIMEOUT_MS: 30000,
+    OPENROUTER_REQUIRE_ZDR: false,
+    AI_MAX_MESSAGE_CHARS: 8000,
+    AI_MAX_HISTORY_MESSAGES: 20,
+    AI_MAX_CONTEXT_CHARS: 40000,
+    AI_MAX_CONVERSATION_MESSAGES: 100,
+    AI_MAX_CONVERSATIONS_PER_USER: 100,
+    AI_RATE_LIMIT_PER_MINUTE: 10,
   });
   const password = 'Admin-Testing-Password42!';
   const hash = await bcrypt.hash(password, 12);
@@ -413,6 +463,9 @@ export async function adminFixture() {
     },
   ];
   const audits: Row[] = [];
+  const aiConversations: Row[] = [];
+  const aiMessages: Row[] = [];
+  const aiUsages: Row[] = [];
   const registry = {
     companies,
     users,
@@ -422,6 +475,9 @@ export async function adminFixture() {
     employeeinvitations: invitations,
     platformadmins: admins,
     adminaudits: audits,
+    aiconversations: aiConversations,
+    aimessages: aiMessages,
+    aiusages: aiUsages,
   };
   const models = {
     company: model(companies, 'companies', registry),
@@ -432,6 +488,9 @@ export async function adminFixture() {
     employeeInvitation: model(invitations, 'employeeinvitations', registry),
     platformAdmin: model(admins, 'platformadmins', registry),
     adminAudit: model(audits, 'adminaudits', registry),
+    aiConversation: model(aiConversations, 'aiconversations', registry),
+    aiMessage: model(aiMessages, 'aimessages', registry),
+    aiUsage: model(aiUsages, 'aiusages', registry),
   };
   const connection = {
     transaction: jest.fn(async (work: (session: object) => unknown) => {

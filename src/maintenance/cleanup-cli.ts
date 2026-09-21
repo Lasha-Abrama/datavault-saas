@@ -13,6 +13,9 @@ import { subscriptionPeriodSchema } from '../subscriptions/entities/subscription
 import { stripeEventSchema } from '../payments/entities/stripe-event.entity';
 import { stripeUsageSchema } from '../payments/entities/stripe-usage.entity';
 import { adminAuditSchema } from '../admin/entities/admin-audit.entity';
+import { aiConversationSchema } from '../ai/entities/ai-conversation.entity';
+import { aiMessageSchema } from '../ai/entities/ai-message.entity';
+import { aiUsageSchema } from '../ai/entities/ai-usage.entity';
 import { CliFailure, CliFailureCategory, safeCliCategory } from './cli-errors';
 import {
   CleanupCollections,
@@ -37,6 +40,9 @@ function collections(connection: Connection): CleanupCollections {
     ['periods', 'subscriptionPeriod', subscriptionPeriodSchema],
     ['stripeEvents', 'stripeEvent', stripeEventSchema],
     ['stripeUsage', 'stripeUsage', stripeUsageSchema],
+    ['aiConversations', 'aiConversation', aiConversationSchema],
+    ['aiMessages', 'aiMessage', aiMessageSchema],
+    ['aiUsage', 'aiUsage', aiUsageSchema],
     ['audits', 'adminAudit', adminAuditSchema],
   ];
   if (!connection.db) throw new CliFailure(CliFailureCategory.MONGO_CONNECTION);

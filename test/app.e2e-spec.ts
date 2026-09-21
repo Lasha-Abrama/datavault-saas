@@ -156,6 +156,12 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .useValue({})
       .overrideProvider(getModelToken('adminAudit'))
       .useValue({})
+      .overrideProvider(getModelToken('aiConversation'))
+      .useValue({})
+      .overrideProvider(getModelToken('aiMessage'))
+      .useValue({})
+      .overrideProvider(getModelToken('aiUsage'))
+      .useValue({})
       .compile();
     app = moduleFixture.createNestApplication();
     configureApp(app);

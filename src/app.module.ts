@@ -14,6 +14,7 @@ import { StatisticsModule } from './statistics/statistics.module';
 import { HealthModule } from './health/health.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AdminModule } from './admin/admin.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { AdminModule } from './admin/admin.module';
     HealthModule,
     PaymentsModule,
     AdminModule,
+    AiModule,
   ],
 })
 export class AppModule {}

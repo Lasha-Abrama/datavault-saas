@@ -264,6 +264,12 @@ describe('company statistics dashboard (e2e)', () => {
       .useValue({ bulkWrite: jest.fn().mockResolvedValue(undefined) })
       .overrideProvider(EmailSender)
       .useValue({ send: jest.fn() })
+      .overrideProvider(getModelToken('aiConversation'))
+      .useValue({})
+      .overrideProvider(getModelToken('aiMessage'))
+      .useValue({})
+      .overrideProvider(getModelToken('aiUsage'))
+      .useValue({})
       .compile();
 
     app = fixture.createNestApplication();

@@ -316,6 +316,18 @@ describe('employee invitations (e2e)', () => {
       .useValue(
         new ConfigService({
           JWT_SECRET: 'a-secure-test-secret-with-32-characters',
+          OPENROUTER_ENABLED: false,
+          OPENROUTER_FALLBACK_MODELS: [],
+          OPENROUTER_MAX_OUTPUT_TOKENS: 1000,
+          OPENROUTER_MAX_TOOL_ITERATIONS: 3,
+          OPENROUTER_TIMEOUT_MS: 30000,
+          OPENROUTER_REQUIRE_ZDR: false,
+          AI_MAX_MESSAGE_CHARS: 8000,
+          AI_MAX_HISTORY_MESSAGES: 20,
+          AI_MAX_CONTEXT_CHARS: 40000,
+          AI_MAX_CONVERSATION_MESSAGES: 100,
+          AI_MAX_CONVERSATIONS_PER_USER: 100,
+          AI_RATE_LIMIT_PER_MINUTE: 10,
           EMPLOYEE_INVITATION_URL:
             'https://client.example.test/invitations/accept',
           FILE_MAX_SIZE_BYTES: 10485760,
@@ -323,6 +335,12 @@ describe('employee invitations (e2e)', () => {
       )
       .overrideGuard(ThrottlerGuard)
       .useValue({ canActivate: () => true })
+      .overrideProvider(getModelToken('aiConversation'))
+      .useValue({})
+      .overrideProvider(getModelToken('aiMessage'))
+      .useValue({})
+      .overrideProvider(getModelToken('aiUsage'))
+      .useValue({})
       .compile();
     app = fixture.createNestApplication();
     configureApp(app);

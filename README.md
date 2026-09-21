@@ -81,6 +81,29 @@ Keep S3 Block Public Access enabled and enable bucket default encryption. The ru
 
 Leaving all four Google variables blank disables Google OAuth.
 
+### Optional OpenRouter AI assistant
+
+The AI assistant is disabled by default. When enabled, the backend alone holds the OpenRouter key and chooses the primary and fallback models. Browser clients cannot provide model IDs, token budgets, usage, prices, tenant IDs, or tool authorization context.
+
+| Variable                            | Required when enabled | Purpose                                                                                                  |
+| ----------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `OPENROUTER_ENABLED`                | No                    | Explicit opt-in; defaults to `false`.                                                                    |
+| `OPENROUTER_API_KEY`                | Yes                   | Backend-only OpenRouter key. Store in a secret manager.                                                  |
+| `OPENROUTER_MODEL`                  | Yes                   | Server-controlled primary `provider/model` ID. Select a model that supports OpenAI-compatible tools.     |
+| `OPENROUTER_FALLBACK_MODELS`        | No                    | Up to three distinct, comma-separated, tool-capable fallback model IDs in routing order.                 |
+| `OPENROUTER_TIMEOUT_MS`             | No                    | Complete request timeout per provider round; defaults to 30 seconds, range 5–120 seconds.                |
+| `OPENROUTER_MAX_OUTPUT_TOKENS`      | No                    | Output-token ceiling for each model round; defaults to 1,000, range 64–8,192.                            |
+| `OPENROUTER_MAX_TOOL_ITERATIONS`    | No                    | Sequential read-only tool-call ceiling; defaults to 3, range 1–5.                                       |
+| `OPENROUTER_REQUIRE_ZDR`            | No                    | Requests Zero Data Retention-compatible routing when `true`; use only with eligible configured models.  |
+| `AI_MAX_MESSAGE_CHARS`              | No                    | Maximum user message length; defaults to 8,000.                                                          |
+| `AI_MAX_HISTORY_MESSAGES`           | No                    | Recent persisted messages eligible for one context; defaults to 20.                                     |
+| `AI_MAX_CONTEXT_CHARS`              | No                    | Character ceiling for persisted history supplied to a request; defaults to 40,000.                      |
+| `AI_MAX_CONVERSATION_MESSAGES`      | No                    | Stored user-visible messages per conversation; defaults to 100.                                         |
+| `AI_MAX_CONVERSATIONS_PER_USER`     | No                    | Stored conversations per tenant user; defaults to 100.                                                  |
+| `AI_RATE_LIMIT_PER_MINUTE`          | No                    | AI chat requests per authenticated company/user tracker; defaults to 10.                                 |
+
+OpenRouter and the selected downstream model provider receive each submitted prompt, bounded user-visible conversation context, the system instruction and, when needed, minimized read-only tool results. Do not promise zero retention unless `OPENROUTER_REQUIRE_ZDR=true` is supported by every configured model/provider and the account routing policy has been verified. The integration always requests providers that deny data collection; review current OpenRouter/provider terms and configure account guardrails, budgets, model allowlists and privacy policy before enabling production traffic.
+
 ## Health and process lifecycle
 
 - `GET /health/live` reports process liveness without contacting dependencies.
@@ -148,6 +171,49 @@ The estimate uses the current plan and current employee count because the assign
 
 Currently stored files and current-period successful uploads are separate values: deleting a file removes its metadata from the stored count but does not reduce historical monthly upload usage. `remainingUploads` is finite for Free and Basic and `null` for Premium, where uploads beyond the included 1,000 are billed as overage. Employee limits use the same convention: `null` means unlimited.
 
+## DataVault AI Assistant (OpenRouter)
+
+The optional `src/ai` module provides a general conversational assistant for activated tenant owners and members. Ordinary programming, writing, explanation, brainstorming and business questions go through the configured language model. DataVault account questions use a bounded server-side tool loop so account facts come from existing authoritative services.
+
+### API and conversation lifecycle
+
+All routes require a tenant JWT, reject platform-admin JWTs, return `Cache-Control: private, no-store`, and derive company/user ownership from the authenticated request:
+
+| Endpoint                       | Input/behavior                                                                                                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /ai/chat`                | `{ "message": "…", "conversationId"?: "…" }`; creates a conversation when the ID is omitted or appends one user/assistant exchange to the caller's conversation. |
+| `GET /ai/conversations`        | Lists only the caller's conversations with bounded `page`/`limit`; content is not duplicated in list results.                                                         |
+| `GET /ai/conversations/:id`    | Returns the caller's conversation and its user-visible user/assistant messages in order.                                                                               |
+| `DELETE /ai/conversations/:id` | Hard-deletes the caller's conversation and message content. Content-free usage records remain for aggregate cost/operations reporting.                                 |
+
+Conversation, message and usage documents carry immutable `companyId` and `userId` references. Every lookup and mutation includes both references; another user in the same company and every other tenant receive the same non-enumerating 404. One expiring database lease serializes requests for a conversation. The final exchange and usage record commit together in a MongoDB transaction, with a unique server-generated request ID supporting safe uncertain-commit recovery. History is bounded by message and character limits, each conversation has a stored-message ceiling, and user conversation counts are bounded.
+
+The usage collection stores only model names, input/output/total tokens, duration, tool-call count and provider cost converted to integer micro-USD when OpenRouter reliably returns it. Values come only from provider responses and server timing. It does not copy prompts, completions or tool results. AI usage is operational metadata only; it does not change DataVault plans, Stripe billing, employee seats, file quotas, or the assignment billing estimate.
+
+### Read-only DataVault tools
+
+The model can request exactly these tools:
+
+- `get_company_profile` — safe company name, country, industry, activation date and caller role.
+- `get_subscription_and_billing` — current plan/entitlements, activation-anchored period, accepted employee count and existing DataVault billing estimate.
+- `get_company_statistics` — the existing tenant dashboard composition for employees, pending invitations, stored files, upload usage and limits.
+- `list_visible_files` — up to 10 recent metadata records after the existing owner/member/uploader/restricted-file authorization rules; no storage key, internal IDs, URL, credentials or file content.
+
+Tool arguments are strict JSON and never accept tenant/user IDs. Unknown or repeated calls, oversized arguments and iteration overflow fail closed. The model proposes calls but never authorizes them: tool services receive the current server-authenticated actor and reuse existing tenant-aware services. Tools cannot write data, access platform administration, query arbitrary MongoDB data, run code/shell commands, fetch URLs, inspect S3 objects, call Stripe, or expose private spreadsheet/CSV contents.
+
+The system instruction treats prompts and tool data as untrusted and forbids disclosure of hidden instructions, schemas, raw tool payloads, credentials, internal identifiers and other tenants. Technical isolation does not depend on the model following that instruction. Request logs contain a random correlation ID and safe usage/timing fields, never prompt/completion/tool content or provider credentials. Provider authentication, credit, rate-limit, timeout, malformed-response and 5xx failures map to sanitized application errors.
+
+This first version returns an atomic JSON response. SSE streaming is intentionally deferred: persisting one complete exchange, applying tool limits and returning one safe provider error are more reliable than exposing partial output before the transaction commits. The controller/client boundary and model client interface leave a clean extension point for a separately designed streaming protocol.
+
+Automated tests replace the model client and make no OpenRouter calls. For one deliberate local provider test after adding your own key:
+
+1. In OpenRouter, create a restricted development key with a small credit/budget limit. Review the selected models' tool support and provider privacy/retention policy; configure account model/provider allowlists as needed.
+2. Put the key only in the ignored local `.env`. Set `OPENROUTER_ENABLED=true`, `OPENROUTER_API_KEY`, a tool-capable `OPENROUTER_MODEL`, and optional tool-capable fallbacks. Keep output, timeout and iteration limits small. Set `OPENROUTER_REQUIRE_ZDR=true` only after confirming eligible routing.
+3. Build and start the backend. Sign in as an activated disposable test-tenant user through your local API client. Keep the tenant JWT in that client's private authorization store rather than source, shell history or saved shared requests.
+4. Send `POST /ai/chat` with `{ "message": "Explain dependency injection in one paragraph." }`. Confirm a normal answer, bounded server-reported usage and no secret/provider details in the response or logs.
+5. Reuse the returned conversation ID with a follow-up, then ask a DataVault question such as `What is my current file allowance?` to exercise an authoritative tool. Do not include secrets or private file contents in prompts.
+6. Retrieve and delete the disposable conversation through the routes above. Set `OPENROUTER_ENABLED=false`, restart, and revoke the temporary key when testing is complete.
+
 ## Private company files
 
 Configure `AWS_BUCKET_NAME` and `AWS_REGION` to enable file operations. Use a private bucket with S3 Block Public Access enabled and an IAM role allowing only the required `PutObject`, `GetObject`, and `DeleteObject` operations. Explicit access-key credentials are optional; the SDK's default credential chain supports deployment IAM roles. Unconfigured storage returns HTTP 503. The previous public CloudFront URL helper has been removed.
@@ -182,6 +248,7 @@ Deletion removes the S3 object first, then its tenant-scoped metadata. S3 failur
 - `src/config`: startup validation and shared HTTP configuration
 - `src/health`: public liveness/readiness probes and MongoDB transaction-capability startup check
 - `src/statistics`: bonus tenant dashboard composed from existing authoritative domain data
+- `src/ai`: tenant-owned conversations, OpenRouter adapter, safe usage accounting, throttling, and read-only DataVault tool loop
 
 ## Commands
 
@@ -226,6 +293,10 @@ npm run start:prod
 - `PATCH /files/:id/permissions` — uploader or company owner replaces visibility and restricted employees
 - `DELETE /files/:id` — uploader or company owner deletes a company file
 - `GET /statistics/current` — activated owner/member tenant dashboard; accepts no client-supplied statistics
+- `POST /ai/chat` — activated owner/member general AI chat with optional owned `conversationId`
+- `GET /ai/conversations` — caller-owned paginated conversation list
+- `GET /ai/conversations/:id` — caller-owned conversation and user-visible history
+- `DELETE /ai/conversations/:id` — hard-delete caller-owned conversation content
 
 ## Optional Stripe Test Mode payments
 
@@ -401,7 +472,7 @@ npm run maintenance:cleanup-disposable -- --company-id REPLACE_WITH_EXACT_COMPAN
 
 The second run rechecks everything inside the deletion transaction. `--confirm-app-stopped` attests an offline maintenance window; the utility cannot detect all other processes. Do not run while application instances, CLI writers or manual database edits remain active. Conditional writes and transaction conflicts protect competing activation/record changes; offline maintenance additionally prevents phantom dependent inserts.
 
-Deletion refuses anything outside the untouched signup shape: non-null/missing company activation, suspended/reactivated status history, changed timestamps/version/unknown fields, missing or duplicate owner/subscription, any accepted employee, non-Free plan, accounting revision, payment restriction, any Stripe identifier/operation/history/outbox, any stored-file/uploader reference, any invitation/inviter reference (including expired/revoked ones still present), **any billing-period row even with zero usage**, inconsistent verification ownership, or audit references to the company/owner. Historical string references are also checked case-insensitively rather than silently omitted by ObjectId casting. An expired verification record may be absent; a resent verification record may remain.
+Deletion refuses anything outside the untouched signup shape: non-null/missing company activation, suspended/reactivated status history, changed timestamps/version/unknown fields, missing or duplicate owner/subscription, any accepted employee, non-Free plan, accounting revision, payment restriction, any Stripe identifier/operation/history/outbox, any stored-file/uploader reference, any invitation/inviter reference (including expired/revoked ones still present), **any billing-period row even with zero usage**, any AI conversation/message/usage reference, inconsistent verification ownership, or audit references to the company/owner. Historical string references are also checked case-insensitively rather than silently omitted by ObjectId casting. An expired verification record may be absent; a resent verification record may remain.
 
 Only that exact company, its single owner, pristine Free subscription and zero/one verification records can be removed. All deletions use one snapshot/majority transaction with exact count checks; failures roll back partial work. Audit history is never deleted. It never contacts Stripe/AWS/SMTP or attempts S3 cleanup. A refusal requires investigation, not removing the safeguards. Reports contain no email, password/hash, verification token or database/provider exception text. Restart the application after maintenance. Repeat deletion reports `company_not_found`, not success.
 

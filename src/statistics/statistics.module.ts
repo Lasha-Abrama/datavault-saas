@@ -18,5 +18,6 @@ import { StatisticsService } from './statistics.service';
   ],
   controllers: [StatisticsController],
   providers: [StatisticsService],
+  exports: [StatisticsService],
 })
 export class StatisticsModule {}

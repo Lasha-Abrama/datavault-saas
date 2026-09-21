@@ -21,6 +21,18 @@ describe('validateEnvironment', () => {
       MONGO_MAX_POOL_SIZE: 20,
       MONGO_RETRY_ATTEMPTS: 5,
       MONGO_RETRY_DELAY_MS: 3000,
+      OPENROUTER_ENABLED: false,
+      OPENROUTER_TIMEOUT_MS: 30000,
+      OPENROUTER_MAX_OUTPUT_TOKENS: 1000,
+      OPENROUTER_MAX_TOOL_ITERATIONS: 3,
+      OPENROUTER_REQUIRE_ZDR: false,
+      OPENROUTER_FALLBACK_MODELS: [],
+      AI_MAX_MESSAGE_CHARS: 8000,
+      AI_MAX_HISTORY_MESSAGES: 20,
+      AI_MAX_CONTEXT_CHARS: 40000,
+      AI_MAX_CONVERSATION_MESSAGES: 100,
+      AI_MAX_CONVERSATIONS_PER_USER: 100,
+      AI_RATE_LIMIT_PER_MINUTE: 10,
     });
   });
 
@@ -84,6 +96,73 @@ describe('validateEnvironment', () => {
         FRONT_URI: 'https://client.example.test',
       }),
     ).toThrow('GOOGLE_CALLBACK_URL');
+  });
+});
+
+describe('OpenRouter environment validation', () => {
+  const enabled = {
+    ...valid,
+    OPENROUTER_ENABLED: 'true',
+    OPENROUTER_API_KEY: `sk-or-v1-${'a'.repeat(48)}`,
+    OPENROUTER_MODEL: 'openai/gpt-4.1-mini',
+    OPENROUTER_FALLBACK_MODELS:
+      'anthropic/claude-sonnet-4, google/gemini-2.5-flash',
+    OPENROUTER_REQUIRE_ZDR: 'true',
+  };
+
+  it('parses enabled provider, privacy, fallback, and abuse controls', () => {
+    expect(validateEnvironment(enabled)).toMatchObject({
+      OPENROUTER_ENABLED: true,
+      OPENROUTER_MODEL: 'openai/gpt-4.1-mini',
+      OPENROUTER_FALLBACK_MODELS: [
+        'anthropic/claude-sonnet-4',
+        'google/gemini-2.5-flash',
+      ],
+      OPENROUTER_REQUIRE_ZDR: true,
+    });
+  });
+
+  it.each([
+    ['OPENROUTER_API_KEY', ''],
+    ['OPENROUTER_API_KEY', 'sk-or-v1-REPLACE_ME'],
+    ['OPENROUTER_API_KEY', 'sk-not-openrouter'],
+    ['OPENROUTER_MODEL', ''],
+    ['OPENROUTER_MODEL', 'REPLACE_ME/model'],
+    ['OPENROUTER_MODEL', 'no-provider-prefix'],
+    ['OPENROUTER_FALLBACK_MODELS', 'openai/gpt-4.1-mini'],
+    ['OPENROUTER_FALLBACK_MODELS', 'a/model,b/model,c/model,d/model'],
+    ['OPENROUTER_FALLBACK_MODELS', 'invalid'],
+    ['OPENROUTER_TIMEOUT_MS', '4999'],
+    ['OPENROUTER_MAX_OUTPUT_TOKENS', '63'],
+    ['OPENROUTER_MAX_TOOL_ITERATIONS', '6'],
+    ['OPENROUTER_REQUIRE_ZDR', 'yes'],
+    ['AI_MAX_MESSAGE_CHARS', '99'],
+    ['AI_MAX_HISTORY_MESSAGES', '51'],
+    ['AI_MAX_CONTEXT_CHARS', '999'],
+    ['AI_MAX_CONVERSATION_MESSAGES', '201'],
+    ['AI_MAX_CONVERSATIONS_PER_USER', '0'],
+    ['AI_RATE_LIMIT_PER_MINUTE', '121'],
+  ])('rejects invalid %s without including its value', (key, value) => {
+    expect(() => validateEnvironment({ ...enabled, [key]: value })).toThrow(
+      key,
+    );
+  });
+
+  it('requires internally consistent history and context bounds', () => {
+    expect(() =>
+      validateEnvironment({
+        ...enabled,
+        AI_MAX_HISTORY_MESSAGES: '20',
+        AI_MAX_CONVERSATION_MESSAGES: '10',
+      }),
+    ).toThrow('AI_MAX_HISTORY_MESSAGES');
+    expect(() =>
+      validateEnvironment({
+        ...enabled,
+        AI_MAX_MESSAGE_CHARS: '8000',
+        AI_MAX_CONTEXT_CHARS: '7000',
+      }),
+    ).toThrow('AI_MAX_CONTEXT_CHARS');
   });
 });
 
