@@ -14,6 +14,17 @@ npm run start:dev
 
 `MONGO_URI`, a random `JWT_SECRET` of at least 32 characters, `ACCOUNT_ACTIVATION_URL`, `EMPLOYEE_INVITATION_URL`, and the required SMTP settings must be configured. The two application URLs should point to frontend pages that read the token and call `/auth/verify-account` or `/invitations/accept`, respectively. The application validates configuration during startup and requires HTTPS for non-local application URLs. Every supported setting is documented in `.env.example`.
 
+### OpenAPI documentation
+
+With the API running locally, the interactive Swagger UI is available at `http://localhost:3000/docs` and the generated OpenAPI JSON document at `http://localhost:3000/docs/openapi.json`. The document is generated from the current Nest controllers and DTO validation metadata; generating it in tests does not initialize MongoDB or call Stripe, S3, SMTP, or OpenRouter.
+
+Swagger defines two deliberately separate Bearer schemes:
+
+- **tenant-jwt** accepts the JWT returned by `POST /auth/sign-in` and applies only to activated company-owner/member endpoints.
+- **platform-admin-jwt** accepts the JWT returned by `POST /admin/auth/login` and applies only to the isolated `/admin` surface.
+
+Use Swagger UI's **Authorize** action for the matching scheme and paste only the JWT value. Do not save a real token in source, documentation, shared API collections, screenshots, or examples. A token from one scheme cannot authorize the other API surface. Public activation, invitation acceptance, health, plan-catalog, OAuth, and signed Stripe-webhook operations are marked without Bearer authentication according to their actual guards.
+
 ## Production configuration
 
 Set configuration in the deployment environment or secret manager; never bake `.env` files into an image. The repository ignores all `.env*` files except the placeholder-only `.env.example`.

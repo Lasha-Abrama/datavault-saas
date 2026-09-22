@@ -9,12 +9,23 @@ import {
   Min,
   ValidateBy,
 } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class AiChatDto {
+  @ApiPropertyOptional({
+    pattern: '^[a-fA-F0-9]{24}$',
+    description:
+      'Owned conversation to continue. Omit to create a conversation.',
+  })
   @IsOptional()
   @IsMongoId()
   conversationId?: string;
 
+  @ApiProperty({
+    minLength: 1,
+    maxLength: 50_000,
+    description: 'User-visible message. Model selection is server-controlled.',
+  })
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )
@@ -31,6 +42,7 @@ export class AiChatDto {
 }
 
 export class AiConversationQueryDto {
+  @ApiPropertyOptional({ minimum: 1, maximum: 1000, default: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -38,6 +50,7 @@ export class AiConversationQueryDto {
   @Max(1_000)
   page = 1;
 
+  @ApiPropertyOptional({ minimum: 1, maximum: 50, default: 20 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -47,6 +60,7 @@ export class AiConversationQueryDto {
 }
 
 export class AiConversationIdDto {
+  @ApiProperty({ pattern: '^[a-fA-F0-9]{24}$' })
   @IsMongoId()
   id: string;
 }

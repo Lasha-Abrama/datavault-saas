@@ -1,10 +1,15 @@
 import { Transform } from 'class-transformer';
-import { IntersectionType } from '@nestjs/mapped-types';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  IntersectionType,
+} from '@nestjs/swagger';
 import { IsString, Length, ValidateIf } from 'class-validator';
 import { CompanyProfileDto } from '../../companies/dto/company-profile.dto';
 import { SignInDto } from './sign-in.dto';
 
 export class SignUpDto extends IntersectionType(SignInDto, CompanyProfileDto) {
+  @ApiProperty({ minLength: 2, maxLength: 100 })
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )
@@ -12,6 +17,7 @@ export class SignUpDto extends IntersectionType(SignInDto, CompanyProfileDto) {
   @Length(2, 100)
   companyName: string;
 
+  @ApiPropertyOptional({ minLength: 1, maxLength: 100 })
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )
