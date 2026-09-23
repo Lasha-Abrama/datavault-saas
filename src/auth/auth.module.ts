@@ -16,6 +16,9 @@ import { EmailModule } from '../email/email.module';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { companyVerificationSchema } from './entities/company-verification.entity';
 import { CompanyVerificationService } from './company-verification.service';
+import { GoogleOAuthFlowService } from './google-oauth-flow.service';
+import { googleOAuthStateSchema } from './entities/google-oauth-state.entity';
+import { googleOAuthExchangeSchema } from './entities/google-oauth-exchange.entity';
 
 @Module({
   imports: [
@@ -35,6 +38,8 @@ import { CompanyVerificationService } from './company-verification.service';
       { name: 'user', schema: userSchema },
       { name: 'company', schema: companySchema },
       { name: 'companyVerification', schema: companyVerificationSchema },
+      { name: 'googleOAuthState', schema: googleOAuthStateSchema },
+      { name: 'googleOAuthExchange', schema: googleOAuthExchangeSchema },
     ]),
   ],
   controllers: [AuthController],
@@ -44,6 +49,7 @@ import { CompanyVerificationService } from './company-verification.service';
     RolesGuard,
     GoogleOauthGuard,
     CompanyVerificationService,
+    GoogleOAuthFlowService,
     {
       provide: GoogleStrategy,
       inject: [ConfigService],

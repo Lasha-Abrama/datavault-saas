@@ -154,6 +154,32 @@ describe('FilesService', () => {
     expect(result).not.toHaveProperty('storageKey');
   });
 
+  it('records an upload in the period when storage succeeds across an anniversary', async () => {
+    const beforeBoundary = new Date('2026-02-15T11:59:59.900Z');
+    const afterBoundary = new Date('2026-02-15T12:00:00.100Z');
+    jest.useFakeTimers().setSystemTime(beforeBoundary);
+    storage.putObject.mockImplementationOnce(() => {
+      jest.setSystemTime(afterBoundary);
+      return Promise.resolve();
+    });
+    try {
+      await service.upload(member, csv);
+      expect(entitlements.checkFileUpload).toHaveBeenCalledWith(
+        member.companyId,
+        1,
+        beforeBoundary,
+      );
+      expect(entitlements.recordFileUploads).toHaveBeenCalledWith(
+        member.companyId,
+        1,
+        afterBoundary,
+        session,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('does not store or count a rejected quota or failed S3 upload', async () => {
     entitlements.checkFileUpload.mockResolvedValue({
       allowed: false,
@@ -210,6 +236,22 @@ describe('FilesService', () => {
       id: fileId,
     });
     expect(storage.deleteObject).not.toHaveBeenCalled();
+  });
+
+  it('retains the private object when an uncertain commit is not yet visible', async () => {
+    const uncertain = Object.assign(new Error('uncertain commit'), {
+      errorLabels: ['UnknownTransactionCommitResult'],
+    });
+    connection.transaction.mockImplementationOnce(() =>
+      Promise.reject(uncertain),
+    );
+    model.findOne.mockResolvedValue(null);
+
+    await expect(service.upload(member, csv)).rejects.toBe(uncertain);
+    expect(storage.deleteObject).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      'Upload transaction outcome is uncertain; storage object retained for reconciliation',
+    );
   });
 
   it('scopes metadata listing and lookup to the actor company', async () => {

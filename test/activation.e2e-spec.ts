@@ -83,6 +83,10 @@ describe('company registration and activation (e2e)', () => {
   const users = new Map<string, UserState>();
   const verifications = new Map<string, VerificationState>();
   const subscriptions = new Map<string, SubscriptionState>();
+  const googleExchanges = new Map<
+    string,
+    { userId: Types.ObjectId; expiresAt: Date }
+  >();
   const sender = { send: jest.fn<Promise<void>, [EmailMessage]>() };
 
   function findCompany(filter: CompanyFilter) {
@@ -99,6 +103,7 @@ describe('company registration and activation (e2e)', () => {
     users.clear();
     verifications.clear();
     subscriptions.clear();
+    googleExchanges.clear();
     sender.send.mockReset().mockResolvedValue(undefined);
     const companyModel = {
       create: jest.fn((inputs: Omit<CompanyState, '_id'>[]) => {
@@ -150,7 +155,9 @@ describe('company registration and activation (e2e)', () => {
           return Promise.resolve([user]);
         },
       ),
-      findById: jest.fn((id: string) => Promise.resolve(users.get(id) ?? null)),
+      findById: jest.fn((id: string | Types.ObjectId) =>
+        Promise.resolve(users.get(id.toString()) ?? null),
+      ),
       findOne: jest.fn((filter: UserFilter) => {
         const user =
           [...users.values()].find(
@@ -288,6 +295,30 @@ describe('company registration and activation (e2e)', () => {
       .useValue({})
       .overrideProvider(getModelToken('companyVerification'))
       .useValue(verificationModel)
+      .overrideProvider(getModelToken('googleOAuthState'))
+      .useValue({})
+      .overrideProvider(getModelToken('googleOAuthExchange'))
+      .useValue({
+        create: jest.fn(
+          (record: {
+            codeHash: string;
+            userId: Types.ObjectId;
+            expiresAt: Date;
+          }) => {
+            googleExchanges.set(record.codeHash, record);
+            return Promise.resolve(record);
+          },
+        ),
+        findOneAndDelete: jest.fn(
+          (filter: { codeHash: string; expiresAt: { $gt: Date } }) => {
+            const record = googleExchanges.get(filter.codeHash);
+            if (!record || record.expiresAt <= filter.expiresAt.$gt)
+              return Promise.resolve(null);
+            googleExchanges.delete(filter.codeHash);
+            return Promise.resolve(record);
+          },
+        ),
+      })
       .overrideProvider(getModelToken('subscription'))
       .useValue(subscriptionModel)
       .overrideProvider(getModelToken('subscriptionPeriod'))
@@ -321,6 +352,9 @@ describe('company registration and activation (e2e)', () => {
             'https://client.example.test/invitations/accept',
           FILE_MAX_SIZE_BYTES: 10485760,
           FRONT_URI: 'https://client.example.test',
+          GOOGLE_CLIENT_ID: 'test-client-id',
+          GOOGLE_CLIENT_SECRET: 'test-client-secret',
+          GOOGLE_CALLBACK_URL: 'https://api.example.test/auth/google/callback',
         }),
       )
       .overrideGuard(GoogleOauthGuard)
@@ -644,8 +678,74 @@ describe('company registration and activation (e2e)', () => {
       .expect(({ headers }: { headers: Record<string, string> }) => {
         const redirect = new URL(headers.location);
         expect(redirect.origin).toBe('https://client.example.test');
-        expect(redirect.searchParams.get('token')).toBeTruthy();
+        expect(redirect.searchParams.get('token')).toBeNull();
+        expect(new URLSearchParams(redirect.hash.slice(1)).get('code')).toMatch(
+          /^[A-Za-z0-9_-]{43}$/,
+        );
       });
+  });
+
+  it('exchanges the Google redirect code once, without a JWT in the URL', async () => {
+    await register().expect(202);
+    await verify(lastToken()).expect(200);
+    const callback = await request(app.getHttpServer())
+      .get('/auth/google/callback')
+      .expect(302);
+    expect(callback.headers['referrer-policy']).toBe('no-referrer');
+    const redirect = new URL(callback.headers.location);
+    const code = new URLSearchParams(redirect.hash.slice(1)).get('code');
+    expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(redirect.searchParams.has('token')).toBe(false);
+    expect(redirect.searchParams.has('code')).toBe(false);
+    const exchanged = await request(app.getHttpServer())
+      .post('/auth/google/exchange')
+      .send({ code })
+      .expect(200);
+    expect(typeof (exchanged.body as Record<string, unknown>).accessToken).toBe(
+      'string',
+    );
+    expect(exchanged.headers['cache-control']).toBe('private, no-store');
+    await request(app.getHttpServer())
+      .post('/auth/google/exchange')
+      .send({ code })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/google/exchange')
+      .send({ code: 'A'.repeat(43) })
+      .expect(401);
+  });
+
+  it('keeps the Google redirect fixed and provider errors generic', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/auth/google/callback')
+      .query({
+        error: 'access_denied',
+        error_description: 'sensitive provider text',
+        redirect: 'https://evil.example.test',
+      })
+      .expect(302);
+    const redirect = new URL(response.headers.location);
+    expect(redirect.origin).toBe('https://client.example.test');
+    expect(redirect.pathname).toBe('/auth/sign-in');
+    expect(redirect.searchParams.get('error')).toBe('google_auth_cancelled');
+    expect(redirect.toString()).not.toContain('sensitive provider text');
+    expect(redirect.toString()).not.toContain('evil.example.test');
+    expect(redirect.searchParams.has('token')).toBe(false);
+    expect(redirect.hash).toBe('');
+  });
+
+  it('does not issue an exchange JWT over insecure production transport', async () => {
+    const config = app.get(ConfigService);
+    const previous = config.get<string>('NODE_ENV');
+    config.set('NODE_ENV', 'production');
+    try {
+      await request(app.getHttpServer())
+        .post('/auth/google/exchange')
+        .send({ code: 'A'.repeat(43) })
+        .expect(403);
+    } finally {
+      config.set('NODE_ENV', previous);
+    }
   });
 
   it('activates only the token company and preserves tenant isolation', async () => {

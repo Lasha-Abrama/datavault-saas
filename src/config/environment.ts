@@ -112,6 +112,15 @@ export function validateEnvironment(config: Record<string, unknown>) {
     httpUrl('FRONT_URI', true);
     requireHttpsOutsideLocalhost('GOOGLE_CALLBACK_URL');
     requireHttpsOutsideLocalhost('FRONT_URI');
+    const callback = new URL(text('GOOGLE_CALLBACK_URL'));
+    if (
+      callback.pathname !== '/auth/google/callback' ||
+      callback.search ||
+      callback.hash
+    )
+      throw new Error(
+        'GOOGLE_CALLBACK_URL must point to /auth/google/callback without query or fragment',
+      );
   }
   const awsKeys = [
     'AWS_BUCKET_NAME',

@@ -45,7 +45,7 @@ export class FilesService {
     actor: AuthenticatedUser,
     upload: UploadedCompanyFile | undefined,
     permissions: UploadFilePermissionsDto = new UploadFilePermissionsDto(),
-    now = new Date(),
+    now?: Date,
   ) {
     const file = validateCompanyFile(
       upload,
@@ -59,7 +59,7 @@ export class FilesService {
     const availability = await this.entitlements.checkFileUpload(
       actor.companyId,
       1,
-      now,
+      now ?? new Date(),
     );
     if (!availability.allowed)
       throw new ForbiddenException({
@@ -81,7 +81,7 @@ export class FilesService {
           await this.entitlements.recordFileUploads(
             actor.companyId,
             1,
-            now,
+            now ?? new Date(),
             session,
           );
           const [created] = await this.fileModel.create(
@@ -120,8 +120,14 @@ export class FilesService {
           this.logger.error(
             'Could not confirm an uncertain upload transaction',
           );
-          throw error;
         }
+        // A missing majority read is not proof that an uncertain commit
+        // aborted. Retain the private object rather than leave committed
+        // metadata pointing at an object that compensation deleted.
+        this.logger.error(
+          'Upload transaction outcome is uncertain; storage object retained for reconciliation',
+        );
+        throw error;
       }
       try {
         await this.storage.deleteObject(storageKey);

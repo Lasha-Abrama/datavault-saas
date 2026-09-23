@@ -42,15 +42,26 @@ export class AuthService {
   }
 
   async signInWithGoogle(profile: GoogleUser) {
+    const user = await this.resolveGoogleUser(profile);
+    return this.signToken(user);
+  }
+
+  async resolveGoogleUser(profile: GoogleUser) {
     const user = await this.userModel.findOne({ email: profile.email });
     if (!user)
       throw new UnauthorizedException(
         'No account is registered for this Google identity',
       );
-    const accessToken = await this.signToken(user);
+    await this.assertTenantAccess(user);
     user.avatar = profile.avatar;
     await user.save();
-    return accessToken;
+    return user;
+  }
+
+  async exchangeGoogleUser(userId: Types.ObjectId) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new UnauthorizedException('Account is unavailable');
+    return { accessToken: await this.signToken(user) };
   }
 
   async signUp({
@@ -118,6 +129,11 @@ export class AuthService {
   }
 
   private async signToken(user: User & { _id: Types.ObjectId }) {
+    await this.assertTenantAccess(user);
+    return this.jwtService.signAsync({ id: user._id.toString() });
+  }
+
+  private async assertTenantAccess(user: User & { _id: Types.ObjectId }) {
     if (
       !(user.companyId instanceof Types.ObjectId) ||
       !Object.values(Role).includes(user.role)
@@ -130,6 +146,5 @@ export class AuthService {
     if (!company) throw new UnauthorizedException('Account is not activated');
     if (company.platformStatus === CompanyPlatformStatus.SUSPENDED)
       throw new UnauthorizedException('Account is unavailable');
-    return this.jwtService.signAsync({ id: user._id.toString() });
   }
 }

@@ -101,7 +101,7 @@ describe('OpenAPI document', () => {
       0,
     );
 
-    expect(operationCount).toBe(52);
+    expect(operationCount).toBe(53);
     expect(document.info).toMatchObject({
       title: 'DataVault SaaS API',
       version: '1.0',
@@ -116,6 +116,18 @@ describe('OpenAPI document', () => {
         expect(Object.keys(operation.responses).length).toBeGreaterThan(0);
       }
     }
+  });
+
+  it('documents Google exchange as public and only returns the normal token response', () => {
+    const exchange = requireOperation(
+      requirePath(document, '/auth/google/exchange'),
+      'post',
+    );
+    expect(exchange.security).toBeUndefined();
+    expect(JSON.stringify(exchange)).not.toContain('clientSecret');
+    expect(JSON.stringify(exchange)).not.toContain('stateHash');
+    expect(JSON.stringify(exchange)).not.toContain('codeHash');
+    expect(exchange.responses?.['200']).toBeDefined();
   });
 
   it('documents actual success statuses and bounded query controls', () => {

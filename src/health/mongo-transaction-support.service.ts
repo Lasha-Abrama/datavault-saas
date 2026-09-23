@@ -31,6 +31,17 @@ export class MongoTransactionSupportService implements OnApplicationBootstrap {
     const supportsTransactions =
       Boolean(hello.setName) || hello.msg === 'isdbgrid';
     if (!supportsSessions || !supportsTransactions) throw this.unsupported();
+
+    // Unique indexes enforce tenant identity, token and accounting invariants.
+    // Mongoose starts autoIndex asynchronously; HTTP must not accept writes
+    // until every registered model has finished initializing its indexes.
+    try {
+      await Promise.all(
+        Object.values(this.connection.models).map((model) => model.init()),
+      );
+    } catch {
+      throw new Error('MongoDB index initialization failed');
+    }
   }
 
   private unsupported() {

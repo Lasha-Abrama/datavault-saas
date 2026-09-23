@@ -97,6 +97,29 @@ describe('validateEnvironment', () => {
       }),
     ).toThrow('GOOGLE_CALLBACK_URL');
   });
+
+  it('requires the exact trusted Google callback route without query or fragment', () => {
+    const google = {
+      ...valid,
+      GOOGLE_CLIENT_ID: 'client',
+      GOOGLE_CLIENT_SECRET: 'secret',
+      FRONT_URI: 'https://client.example.test',
+    };
+    expect(() =>
+      validateEnvironment({
+        ...google,
+        GOOGLE_CALLBACK_URL: 'https://api.example.test/auth/google/callback',
+      }),
+    ).not.toThrow();
+    for (const callback of [
+      'https://api.example.test/other',
+      'https://api.example.test/auth/google/callback?next=https://evil.test',
+      'https://api.example.test/auth/google/callback#fragment',
+    ])
+      expect(() =>
+        validateEnvironment({ ...google, GOOGLE_CALLBACK_URL: callback }),
+      ).toThrow('GOOGLE_CALLBACK_URL');
+  });
 });
 
 describe('OpenRouter environment validation', () => {

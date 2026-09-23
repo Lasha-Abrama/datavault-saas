@@ -20,7 +20,11 @@ describe('AuthService company onboarding', () => {
   const userId = new Types.ObjectId();
   const session = {};
   const companyModel = { create: jest.fn(), findOne: jest.fn() };
-  const userModel = { create: jest.fn(), findOne: jest.fn() };
+  const userModel = {
+    create: jest.fn(),
+    findOne: jest.fn(),
+    findById: jest.fn(),
+  };
   const connection = {
     transaction: jest.fn((work: (value: object) => unknown) => work(session)),
   };
@@ -202,5 +206,36 @@ describe('AuthService company onboarding', () => {
       }),
     ).resolves.toBe('token');
     expect(user.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads user and company before exchanging a Google code, blocking deactivation or suspension', async () => {
+    const user = { _id: userId, companyId, role: Role.COMPANY_OWNER };
+    userModel.findById.mockResolvedValue(user);
+    companyModel.findOne.mockResolvedValueOnce(null);
+    await expect(service.exchangeGoogleUser(userId)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(jwt.signAsync).not.toHaveBeenCalled();
+    companyModel.findOne.mockResolvedValueOnce({
+      _id: companyId,
+      activatedAt: new Date(),
+      platformStatus: 'suspended',
+    });
+    await expect(service.exchangeGoogleUser(userId)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(jwt.signAsync).not.toHaveBeenCalled();
+    userModel.findById.mockResolvedValueOnce(null);
+    await expect(service.exchangeGoogleUser(userId)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(jwt.signAsync).not.toHaveBeenCalled();
+    companyModel.findOne.mockResolvedValueOnce({
+      _id: companyId,
+      activatedAt: new Date(),
+    });
+    await expect(service.exchangeGoogleUser(userId)).resolves.toEqual({
+      accessToken: 'token',
+    });
   });
 });

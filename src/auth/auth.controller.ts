@@ -8,6 +8,8 @@ import {
   Res,
   HttpCode,
   HttpStatus,
+  ServiceUnavailableException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
@@ -23,6 +25,8 @@ import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { VerifyAccountDto } from './dto/verify-account.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompanyVerificationService } from './company-verification.service';
+import { GoogleOAuthFlowService } from './google-oauth-flow.service';
+import { GoogleExchangeDto } from './dto/google-exchange.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -30,14 +34,17 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly companyVerificationService: CompanyVerificationService,
     private readonly config: ConfigService,
+    private readonly googleOAuthFlow: GoogleOAuthFlowService,
   ) {}
 
   @Get('google')
-  @UseGuards(GoogleOauthGuard)
+  @UseGuards(ThrottlerGuard, GoogleOauthGuard)
+  @Throttle({ publicAuth: { limit: 10, ttl: 60_000 } })
   googleAuth() {}
 
   @Get('google/callback')
-  @UseGuards(GoogleOauthGuard)
+  @UseGuards(ThrottlerGuard, GoogleOauthGuard)
+  @Throttle({ publicAuth: { limit: 20, ttl: 60_000 } })
   async googleRedirect(
     @Req() req: Request & { user: GoogleUser },
     @Res() res: Response,
@@ -46,14 +53,37 @@ export class AuthController {
       '/auth/sign-in',
       this.config.getOrThrow<string>('FRONT_URI'),
     );
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     if (req.query.error)
       redirect.searchParams.set('error', 'google_auth_cancelled');
-    else
-      redirect.searchParams.set(
-        'token',
-        await this.authService.signInWithGoogle(req.user),
-      );
+    else {
+      const user = await this.authService.resolveGoogleUser(req.user);
+      redirect.hash = new URLSearchParams({
+        code: await this.googleOAuthFlow.createExchange(user._id),
+      }).toString();
+    }
     res.redirect(redirect.toString());
+  }
+
+  @Post('google/exchange')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ publicAuth: { limit: 10, ttl: 60_000 } })
+  async googleExchange(
+    @Body() dto: GoogleExchangeDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (!this.config.get<string>('GOOGLE_CLIENT_ID'))
+      throw new ServiceUnavailableException(
+        'Google authentication is not configured',
+      );
+    if (this.config.get<string>('NODE_ENV') === 'production' && !req.secure)
+      throw new ForbiddenException('HTTPS is required for Google exchange');
+    res.setHeader('Cache-Control', 'private, no-store');
+    const userId = await this.googleOAuthFlow.consumeExchange(dto.code);
+    return this.authService.exchangeGoogleUser(userId);
   }
 
   @Post('sign-in')

@@ -34,6 +34,7 @@ import { ResendVerificationDto } from '../auth/dto/resend-verification.dto';
 import { SignInDto } from '../auth/dto/sign-in.dto';
 import { SignUpDto } from '../auth/dto/sign-up.dto';
 import { VerifyAccountDto } from '../auth/dto/verify-account.dto';
+import { GoogleExchangeDto } from '../auth/dto/google-exchange.dto';
 import { CompaniesController } from '../companies/companies.controller';
 import { CompanyFileVisibility } from '../files/entities/company-file.entity';
 import { FilesController } from '../files/files.controller';
@@ -128,16 +129,22 @@ export function applyOpenApiMetadata() {
   decorateMethod(
     AuthController,
     'googleAuth',
-    ApiOperation({ summary: 'Start Google OAuth sign-in' }),
-    ApiFoundResponse({ description: 'Redirects to Google OAuth.' }),
+    ApiOperation({ summary: 'Start browser-bound Google OAuth sign-in' }),
+    ApiFoundResponse({
+      description:
+        'Sets a short-lived HttpOnly state cookie and redirects to Google. The frontend should navigate the browser to this endpoint.',
+    }),
     ApiServiceUnavailableResponse(error('Google OAuth is not configured.')),
   );
   decorateMethod(
     AuthController,
     'googleRedirect',
-    ApiOperation({ summary: 'Handle Google OAuth callback' }),
+    ApiOperation({
+      summary: 'Validate Google OAuth callback and issue an exchange code',
+    }),
     ApiFoundResponse({
-      description: 'Redirects to the configured frontend sign-in route.',
+      description:
+        'After single-use state validation, redirects to the configured frontend sign-in route with a short-lived opaque code in the URL fragment, never a JWT. Provider denial redirects with a generic error.',
     }),
     ApiServiceUnavailableResponse(error('Google OAuth is not configured.')),
     ApiUnauthorizedResponse(
@@ -145,6 +152,26 @@ export function applyOpenApiMetadata() {
         'The Google identity is not registered or its company is unavailable.',
       ),
     ),
+  );
+  decorateMethod(
+    AuthController,
+    'googleExchange',
+    ApiOperation({
+      summary: 'Exchange a single-use Google sign-in code for a tenant JWT',
+    }),
+    ApiBody({ type: GoogleExchangeDto }),
+    ApiBadRequestResponse(error('The exchange code has an invalid format.')),
+    ApiOkResponse({
+      description:
+        'Tenant JWT issued after current account and company checks.',
+      schema: apiSchemas.accessToken,
+    }),
+    ApiUnauthorizedResponse(
+      error('Invalid, expired, consumed, or unavailable Google sign-in.'),
+    ),
+    ApiForbiddenResponse(error('HTTPS is required in production.')),
+    ApiServiceUnavailableResponse(error('Google OAuth is not configured.')),
+    ApiTooManyRequestsResponse(error('Too many Google sign-in exchanges.')),
   );
   decorateMethod(
     AuthController,
