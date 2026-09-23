@@ -5,6 +5,7 @@ const valid = {
   JWT_SECRET: 'a-secure-test-secret-with-32-characters',
   ACCOUNT_ACTIVATION_URL: 'https://client.test/auth/activate',
   EMPLOYEE_INVITATION_URL: 'https://client.test/invitations/accept',
+  EMAIL_PROVIDER: 'smtp',
   SMTP_HOST: 'smtp.example.test',
   SMTP_FROM: 'no-reply@example.test',
 };
@@ -46,6 +47,8 @@ describe('validateEnvironment', () => {
     [{ ...valid, SMTP_PORT: '0' }, 'SMTP_PORT'],
     [{ ...valid, SMTP_SECURE: 'yes' }, 'SMTP_SECURE'],
     [{ ...valid, SMTP_USER: 'user' }, 'SMTP_PASSWORD'],
+    [{ ...valid, EMAIL_PROVIDER: '' }, 'EMAIL_PROVIDER'],
+    [{ ...valid, EMAIL_PROVIDER: 'auto' }, 'EMAIL_PROVIDER'],
     [{ ...valid, FILE_MAX_SIZE_BYTES: '0' }, 'FILE_MAX_SIZE_BYTES'],
     [{ ...valid, FILE_MAX_SIZE_BYTES: '104857601' }, 'FILE_MAX_SIZE_BYTES'],
     [{ ...valid, NODE_ENV: 'staging' }, 'NODE_ENV'],
@@ -84,6 +87,39 @@ describe('validateEnvironment', () => {
         SMTP_PASSWORD: 'password',
       }),
     ).toMatchObject({ SMTP_PORT: 465, SMTP_SECURE: true });
+  });
+
+  it('requires only Resend credentials in resend mode', () => {
+    const resend = {
+      ...valid,
+      EMAIL_PROVIDER: 'resend',
+      SMTP_HOST: undefined,
+      SMTP_FROM: undefined,
+      RESEND_API_KEY: 're_example_test_key_12345',
+      RESEND_FROM: 'no-reply@example.test',
+    };
+    expect(validateEnvironment(resend)).toMatchObject(resend);
+    expect(() =>
+      validateEnvironment({ ...resend, RESEND_API_KEY: '' }),
+    ).toThrow('RESEND_API_KEY');
+    expect(() =>
+      validateEnvironment({ ...resend, RESEND_API_KEY: 'REPLACE_ME' }),
+    ).toThrow('RESEND_API_KEY');
+    expect(() => validateEnvironment({ ...resend, RESEND_FROM: '' })).toThrow(
+      'RESEND_FROM',
+    );
+    expect(() =>
+      validateEnvironment({ ...resend, RESEND_FROM: 'invalid' }),
+    ).toThrow('RESEND_FROM');
+    expect(() =>
+      validateEnvironment({ ...resend, SMTP_PORT: 'invalid' }),
+    ).not.toThrow();
+  });
+
+  it('does not require Resend credentials in smtp mode', () => {
+    expect(() =>
+      validateEnvironment({ ...valid, RESEND_API_KEY: '', RESEND_FROM: '' }),
+    ).not.toThrow();
   });
 
   it('requires HTTPS for configured OAuth URLs outside localhost', () => {

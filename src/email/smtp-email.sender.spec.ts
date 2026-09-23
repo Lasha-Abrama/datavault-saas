@@ -71,4 +71,24 @@ describe('SmtpEmailSender', () => {
       text: 'Link',
     });
   });
+
+  it('does not expose raw SMTP failures', async () => {
+    jest.mocked(nodemailer.createTransport).mockReturnValue({
+      sendMail: jest
+        .fn()
+        .mockRejectedValue(new Error('private SMTP transport details')),
+    } as never);
+    const sender = new SmtpEmailSender(
+      new ConfigService({
+        SMTP_HOST: 'smtp.example.test',
+        SMTP_PORT: 587,
+        SMTP_SECURE: false,
+        SMTP_REQUIRE_TLS: true,
+        SMTP_FROM: 'no-reply@example.test',
+      }),
+    );
+    await expect(
+      sender.send({ to: 'owner@example.test', subject: 'Test', text: 'Link' }),
+    ).rejects.toThrow('Email delivery failed');
+  });
 });

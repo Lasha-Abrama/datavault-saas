@@ -1,12 +1,17 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EmailSender } from './email-sender';
+import { createEmailSender } from './email-sender.provider';
 import { EmailService } from './email.service';
-import { SmtpEmailSender } from './smtp-email.sender';
 
 @Module({
   providers: [
     EmailService,
-    { provide: EmailSender, useClass: SmtpEmailSender },
+    {
+      provide: EmailSender,
+      inject: [ConfigService],
+      useFactory: createEmailSender,
+    },
   ],
   exports: [EmailService, EmailSender],
 })

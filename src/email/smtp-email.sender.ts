@@ -63,6 +63,11 @@ export class SmtpEmailSender implements EmailSender {
   }
 
   async send(message: EmailMessage) {
-    await this.transporter.sendMail({ from: this.from, ...message });
+    try {
+      await this.transporter.sendMail({ from: this.from, ...message });
+    } catch {
+      // SMTP errors can include recipient addresses and transport details.
+      throw new Error('Email delivery failed');
+    }
   }
 }

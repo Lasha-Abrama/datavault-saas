@@ -12,7 +12,7 @@ cp .env.example .env
 npm run start:dev
 ```
 
-`MONGO_URI`, a random `JWT_SECRET` of at least 32 characters, `ACCOUNT_ACTIVATION_URL`, `EMPLOYEE_INVITATION_URL`, and the required SMTP settings must be configured. The two application URLs should point to frontend pages that read the token and call `/auth/verify-account` or `/invitations/accept`, respectively. The application validates configuration during startup and requires HTTPS for non-local application URLs. Every supported setting is documented in `.env.example`.
+`MONGO_URI`, a random `JWT_SECRET` of at least 32 characters, `ACCOUNT_ACTIVATION_URL`, `EMPLOYEE_INVITATION_URL`, `EMAIL_PROVIDER`, and that provider's required settings must be configured. The two application URLs should point to frontend pages that read the token and call `/auth/verify-account` or `/invitations/accept`, respectively. The application validates configuration during startup and requires HTTPS for non-local application URLs. Every supported setting is documented in `.env.example`.
 
 ### Continuous integration
 
@@ -61,18 +61,24 @@ The fresh application keeps Mongoose automatic index creation enabled so require
 
 JWTs use HS256 with a one-hour lifetime and an explicit algorithm allowlist. Helmet supplies standard security headers. DTO validation strips no unknown values silently: unknown fields are rejected. CORS does not allow credentials and never defaults to a wildcard. Public sign-in, registration, verification, resend, and invitation acceptance routes are rate-limited in memory. A horizontally scaled deployment should replace that limiter store with a shared implementation and set `TRUST_PROXY_HOPS` to the verified proxy chain.
 
-### Email/SMTP
+### Transactional email
 
-| Variable                     | Required           | Purpose                                                            |
-| ---------------------------- | ------------------ | ------------------------------------------------------------------ |
-| `SMTP_HOST`                  | Yes                | SMTP hostname or IP address.                                       |
-| `SMTP_PORT`                  | No                 | Defaults to 587, or 465 when implicit TLS is enabled.              |
-| `SMTP_SECURE`                | No                 | `true` for implicit TLS, normally port 465; defaults to `false`.   |
-| `SMTP_REQUIRE_TLS`           | No                 | Requires STARTTLS when not using implicit TLS; defaults to `true`. |
-| `SMTP_FROM`                  | Yes                | Verified sender email address.                                     |
-| `SMTP_USER`, `SMTP_PASSWORD` | Provider-dependent | Authentication pair; configure both or neither.                    |
+`EMAIL_PROVIDER` is required and must be `smtp` or `resend`; the choice is independent of `NODE_ENV`. Auth and invitation services create the same plaintext activation/invitation messages and links through one sender interface. Exactly one provider handles each attempt; there is no automatic fallback or cross-provider retry.
 
-SMTP connection, greeting, and socket timeouts are bounded. Nodemailer file and URL access are disabled. Activation and invitation URLs must use HTTPS outside localhost. Before launch, verify sender-domain authorization, outbound network access, link routing, and delivery with the real provider.
+| Variable                     | Required when             | Purpose                                                            |
+| ---------------------------- | ------------------------- | ------------------------------------------------------------------ |
+| `SMTP_HOST`                  | `EMAIL_PROVIDER=smtp`     | SMTP hostname or IP address.                                       |
+| `SMTP_FROM`                  | `EMAIL_PROVIDER=smtp`     | Plain sender email address.                                        |
+| `SMTP_PORT`                  | Optional in SMTP mode     | Defaults to 587, or 465 when implicit TLS is enabled.              |
+| `SMTP_SECURE`                | Optional in SMTP mode     | `true` for implicit TLS, normally port 465; defaults to `false`.   |
+| `SMTP_REQUIRE_TLS`           | Optional in SMTP mode     | Requires STARTTLS when not using implicit TLS; defaults to `true`. |
+| `SMTP_USER`, `SMTP_PASSWORD` | Optional pair in SMTP mode | Configure both or neither.                                         |
+| `RESEND_API_KEY`             | `EMAIL_PROVIDER=resend`   | Backend-only Resend API key, stored as a deployment secret.         |
+| `RESEND_FROM`                | `EMAIL_PROVIDER=resend`   | Plain email address on a verified Resend sender domain.            |
+
+Local development can keep Nodemailer/Gmail with `EMAIL_PROVIDER=smtp`. SMTP connection, greeting, and socket timeouts are bounded; Nodemailer file and URL access are disabled. **Render Free blocks outbound SMTP ports 25, 465, and 587, so the Gmail SMTP path is not suitable there.** For Render staging, verify a sending domain in Resend, create a send-only API key, set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, and `RESEND_FROM` in Render, and omit SMTP variables. Resend delivery uses HTTPS with a 10-second timeout; provider errors and response bodies are never forwarded to clients or logged. The API key stays on the backend. Both frontend application URLs remain required and provider-independent; verify HTTPS link routing and actual delivery before opening registration.
+
+Registration commits the inactive company, owner, Free subscription, and verification record before requesting delivery. If delivery fails, signup returns a sanitized 503 even though registration was saved; resend-verification remains available. Invitation creation similarly commits the pending invitation before delivery, then returns a sanitized 503 if sending fails; the owner can resend it later. These semantics do not depend on the selected provider.
 
 ### AWS S3 and files
 

@@ -68,27 +68,40 @@ export function validateEnvironment(config: Record<string, unknown>) {
   required('EMPLOYEE_INVITATION_URL');
   httpUrl('EMPLOYEE_INVITATION_URL');
   requireHttpsOutsideLocalhost('EMPLOYEE_INVITATION_URL');
-  required('SMTP_HOST');
-  if (!/^[A-Za-z0-9.:[\]_-]+$/.test(text('SMTP_HOST')))
-    throw new Error('SMTP_HOST must be a valid hostname or IP address');
-  required('SMTP_FROM');
-  if (!isEmail(text('SMTP_FROM')))
-    throw new Error('SMTP_FROM must be a valid email address');
-  const smtpSecure = boolean('SMTP_SECURE', false);
-  const smtpRequireTls = boolean('SMTP_REQUIRE_TLS', true);
-  const smtpPort = text('SMTP_PORT') || (smtpSecure ? '465' : '587');
-  if (
-    !/^\d+$/.test(smtpPort) ||
-    Number(smtpPort) < 1 ||
-    Number(smtpPort) > 65535
-  )
-    throw new Error('SMTP_PORT must be an integer between 1 and 65535');
-  result.SMTP_PORT = Number(smtpPort);
-  result.SMTP_SECURE = smtpSecure;
-  result.SMTP_REQUIRE_TLS = smtpRequireTls;
-  if (text('SMTP_USER') || text('SMTP_PASSWORD')) {
-    required('SMTP_USER');
-    required('SMTP_PASSWORD');
+  required('EMAIL_PROVIDER');
+  const emailProvider = text('EMAIL_PROVIDER');
+  if (emailProvider !== 'smtp' && emailProvider !== 'resend')
+    throw new Error('EMAIL_PROVIDER must be smtp or resend');
+  if (emailProvider === 'smtp') {
+    required('SMTP_HOST');
+    if (!/^[A-Za-z0-9.:[\]_-]+$/.test(text('SMTP_HOST')))
+      throw new Error('SMTP_HOST must be a valid hostname or IP address');
+    required('SMTP_FROM');
+    if (!isEmail(text('SMTP_FROM')))
+      throw new Error('SMTP_FROM must be a valid email address');
+    const smtpSecure = boolean('SMTP_SECURE', false);
+    const smtpRequireTls = boolean('SMTP_REQUIRE_TLS', true);
+    const smtpPort = text('SMTP_PORT') || (smtpSecure ? '465' : '587');
+    if (
+      !/^\d+$/.test(smtpPort) ||
+      Number(smtpPort) < 1 ||
+      Number(smtpPort) > 65535
+    )
+      throw new Error('SMTP_PORT must be an integer between 1 and 65535');
+    result.SMTP_PORT = Number(smtpPort);
+    result.SMTP_SECURE = smtpSecure;
+    result.SMTP_REQUIRE_TLS = smtpRequireTls;
+    if (text('SMTP_USER') || text('SMTP_PASSWORD')) {
+      required('SMTP_USER');
+      required('SMTP_PASSWORD');
+    }
+  } else {
+    required('RESEND_API_KEY');
+    if (!/^re_[A-Za-z0-9_-]{8,}$/.test(text('RESEND_API_KEY')))
+      throw new Error('RESEND_API_KEY must be a Resend API key');
+    required('RESEND_FROM');
+    if (!isEmail(text('RESEND_FROM')))
+      throw new Error('RESEND_FROM must be a valid email address');
   }
   if (text('CORS_ORIGIN')) {
     for (const origin of text('CORS_ORIGIN')
