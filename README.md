@@ -14,6 +14,10 @@ npm run start:dev
 
 `MONGO_URI`, a random `JWT_SECRET` of at least 32 characters, `ACCOUNT_ACTIVATION_URL`, `EMPLOYEE_INVITATION_URL`, and the required SMTP settings must be configured. The two application URLs should point to frontend pages that read the token and call `/auth/verify-account` or `/invitations/accept`, respectively. The application validates configuration during startup and requires HTTPS for non-local application URLs. Every supported setting is documented in `.env.example`.
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on pushes and pull requests to `main`. It uses Node 24 from `.nvmrc` and `npm ci`, then checks formatting, ESLint, the production build, the complete unit and HTTP e2e suites (including Swagger/OpenAPI tests), and high/critical npm advisories. CI supplies only explicit, non-secret test placeholders. The tests mock MongoDB and external providers; CI uses no Atlas database, Stripe, S3, SMTP, OpenRouter, Google OAuth, or repository secrets. The Dockerfile is not built or published by CI because the same application build is already checked and no container registry or deployment target has been selected.
+
 ### OpenAPI documentation
 
 With the API running locally, the interactive Swagger UI is available at `http://localhost:3000/docs` and the generated OpenAPI JSON document at `http://localhost:3000/docs/openapi.json`. The document is generated from the current Nest controllers and DTO validation metadata; generating it in tests does not initialize MongoDB or call Stripe, S3, SMTP, or OpenRouter.
