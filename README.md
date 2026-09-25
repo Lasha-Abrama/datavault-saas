@@ -22,6 +22,8 @@ npm run start:dev
 
 With the API running locally, the interactive Swagger UI is available at `http://localhost:3000/docs` and the generated OpenAPI JSON document at `http://localhost:3000/docs/openapi.json`. The document is generated from the current Nest controllers and DTO validation metadata; generating it in tests does not initialize MongoDB or call Stripe, S3, SMTP, or OpenRouter.
 
+For the deployed Render staging API and frontend integration contract, see [FRONTEND_HANDOFF.md](FRONTEND_HANDOFF.md).
+
 Swagger defines two deliberately separate Bearer schemes:
 
 - **tenant-jwt** accepts the JWT returned by `POST /auth/sign-in` and applies only to activated company-owner/member endpoints.
@@ -256,7 +258,7 @@ Deletion removes the S3 object first, then its tenant-scoped metadata. S3 failur
 ## Architecture
 
 - `src/auth`: company onboarding, email/password and optional Google sign-in, and JWT issuance
-- `src/email`: provider-neutral email contract, activation/invitation templates, and SMTP adapter
+- `src/email`: provider-neutral email contract, activation/invitation templates, and SMTP/Resend adapters
 - `src/invitations`: tenant-bound employee invitation lifecycle and acceptance
 - `src/companies`: company schema, current-company read/update routes, and validation
 - `src/users`: tenant-scoped management of existing users
