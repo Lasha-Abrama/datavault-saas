@@ -138,8 +138,188 @@ describe('GeminiClientService', () => {
     expect(request.messages[1]).toMatchObject({
       ...assistant,
       role: 'model',
+      content: undefined,
     });
+    expect(JSON.parse(JSON.stringify(request.messages[1]))).not.toHaveProperty(
+      'content',
+    );
   });
+
+  it('accepts documented Gemini tool calls without a content property and preserves parallel signatures', async () => {
+    const { service, create } = fixture();
+    const calls = [
+      {
+        type: 'function',
+        id: 'call-first',
+        function: { name: 'get_company_statistics', arguments: '{}' },
+        extra_content: { google: { thought_signature: 'opaque-first' } },
+      },
+      {
+        type: 'function',
+        id: 'call-second',
+        function: { name: 'get_company_statistics', arguments: '{}' },
+      },
+    ];
+    create.mockResolvedValueOnce({
+      model: 'gemini-3.5-flash-lite',
+      choices: [
+        {
+          finish_reason: 'tool_calls',
+          message: { role: 'model', tool_calls: calls },
+        },
+      ],
+      usage: { prompt_tokens: 11, completion_tokens: 9, total_tokens: 20 },
+    });
+    const first = await service.complete([], tools, AbortSignal.timeout(1000));
+    expect(first).toMatchObject({
+      message: { role: 'assistant', content: null, tool_calls: calls },
+      promptTokens: 11,
+      completionTokens: 9,
+      totalTokens: 20,
+    });
+    create.mockResolvedValueOnce({
+      model: 'gemini-3.5-flash-lite',
+      choices: [{ message: { role: 'assistant', content: 'Done' } }],
+    });
+    await service.complete(
+      [
+        first.message,
+        { role: 'tool', tool_call_id: 'call-first', content: '{}' },
+        { role: 'tool', tool_call_id: 'call-second', content: '{}' },
+      ],
+      tools,
+      AbortSignal.timeout(1000),
+    );
+    const recordedCalls: unknown = create.mock.calls;
+    const sent = (recordedCalls as Array<Array<{ messages: unknown }>>)[1][0]
+      .messages as Array<{
+      role: string;
+      tool_calls?: unknown;
+      tool_call_id?: string;
+      name?: string;
+    }>;
+    expect(sent[0]).toMatchObject({ role: 'model', tool_calls: calls });
+    expect(JSON.parse(JSON.stringify(sent[0]))).not.toHaveProperty('content');
+    expect(sent.slice(1)).toEqual([
+      expect.objectContaining({
+        role: 'tool',
+        name: 'get_company_statistics',
+        tool_call_id: 'call-first',
+      }),
+      expect.objectContaining({
+        role: 'tool',
+        name: 'get_company_statistics',
+        tool_call_id: 'call-second',
+      }),
+    ]);
+  });
+
+  it('accepts empty-string content only when valid tool calls carry the output', async () => {
+    const { service, create } = fixture();
+    create.mockResolvedValue({
+      model: 'gemini-3.5-flash-lite',
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                type: 'function',
+                id: 'call-1',
+                function: {
+                  name: 'get_company_statistics',
+                  arguments: '{}',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    await expect(
+      service.complete([], tools, AbortSignal.timeout(1000)),
+    ).resolves.toMatchObject({ message: { content: '' } });
+  });
+
+  it.each([
+    ['missing_choices', { choices: [] }],
+    ['missing_message', { choices: [{}] }],
+    [
+      'invalid_message_role',
+      { choices: [{ message: { role: 'user', content: 'x' } }] },
+    ],
+    [
+      'invalid_content',
+      {
+        choices: [
+          { message: { role: 'assistant', content: [{ text: 'private' }] } },
+        ],
+      },
+    ],
+    [
+      'missing_visible_output',
+      {
+        choices: [{ finish_reason: 'length', message: { role: 'assistant' } }],
+      },
+    ],
+    [
+      'missing_visible_output',
+      { choices: [{ message: { role: 'assistant', content: '' } }] },
+    ],
+    [
+      'malformed_tool_call',
+      {
+        choices: [
+          { message: { role: 'assistant', content: null, tool_calls: [{}] } },
+        ],
+      },
+    ],
+    [
+      'invalid_tool_arguments',
+      {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  type: 'function',
+                  id: 'x',
+                  function: { name: 'get_company_statistics', arguments: {} },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+    [
+      'missing_model',
+      {
+        model: '',
+        choices: [{ message: { role: 'assistant', content: 'x' } }],
+      },
+    ],
+  ])(
+    'classifies %s without retaining response content',
+    async (code, response) => {
+      const { service, create } = fixture();
+      create.mockResolvedValue({ model: 'gemini-3.5-flash-lite', ...response });
+      await expect(
+        service.complete([], tools, AbortSignal.timeout(1000)),
+      ).rejects.toMatchObject({
+        reason: AiProviderFailureReason.INVALID_RESPONSE,
+        diagnostic: { code },
+      });
+      try {
+        await service.complete([], tools, AbortSignal.timeout(1000));
+      } catch (error) {
+        expect(JSON.stringify(error)).not.toContain('private');
+      }
+    },
+  );
 
   it('normalizes the documented Gemini model role for function calls', async () => {
     const { service, create } = fixture();

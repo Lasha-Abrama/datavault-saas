@@ -105,10 +105,18 @@ export class GeminiClientService implements AiModelClient {
         if (message.tool_calls?.length)
           // Gemini's compatibility API documents `model` for function-call
           // history. Preserve its opaque extra_content thought signature.
-          return {
-            ...message,
-            role: 'model',
-          } as unknown as ChatCompletionMessageParam;
+          // Its examples omit content for tool-only messages. Keep that
+          // wire shape when the normalized internal message uses null.
+          return message.content === null
+            ? ({
+                ...message,
+                role: 'model',
+                content: undefined,
+              } as unknown as ChatCompletionMessageParam)
+            : ({
+                ...message,
+                role: 'model',
+              } as unknown as ChatCompletionMessageParam);
       }
       if (message.role !== 'tool') return message;
       const name = names.get(message.tool_call_id);

@@ -41,10 +41,34 @@ export enum AiProviderFailureReason {
   INVALID_RESPONSE = 'invalid_response',
 }
 
+/** Fixed, content-free response diagnostics. Never attach provider payloads. */
+export type AiResponseValidationCode =
+  | 'invalid_envelope'
+  | 'missing_choices'
+  | 'missing_message'
+  | 'invalid_message_role'
+  | 'invalid_content'
+  | 'missing_visible_output'
+  | 'malformed_tool_call'
+  | 'invalid_tool_arguments'
+  | 'missing_model'
+  | 'invalid_usage'
+  | 'response_too_large'
+  | 'tool_iteration_limit';
+
+export interface AiResponseDiagnostic {
+  code: AiResponseValidationCode;
+  finishReason?: 'stop' | 'length' | 'tool_calls' | 'other' | 'missing';
+  contentType?:
+    'missing' | 'null' | 'string' | 'array' | 'object' | 'number' | 'boolean';
+  toolCallCount?: number;
+}
+
 export class AiProviderFailure extends Error {
   constructor(
     public readonly reason: AiProviderFailureReason,
     public readonly status?: number,
+    public readonly diagnostic?: AiResponseDiagnostic,
   ) {
     super(reason);
   }

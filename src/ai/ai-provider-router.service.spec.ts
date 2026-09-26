@@ -157,4 +157,36 @@ describe('AiProviderRouterService', () => {
       log.mockRestore();
     }
   });
+
+  it('logs only allowlisted structural validation diagnostics after Gemini fallback fails', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    try {
+      const { call, openRouter, gemini } = fixture();
+      openRouter.complete.mockRejectedValueOnce(
+        new AiProviderFailure(AiProviderFailureReason.RATE_LIMIT, 429),
+      );
+      gemini.complete.mockRejectedValueOnce(
+        new AiProviderFailure(
+          AiProviderFailureReason.INVALID_RESPONSE,
+          undefined,
+          {
+            code: 'missing_visible_output',
+            finishReason: 'length',
+            contentType: 'missing',
+            toolCallCount: 0,
+          },
+        ),
+      );
+      await expect(call()).rejects.toMatchObject({
+        reason: AiProviderFailureReason.INVALID_RESPONSE,
+      });
+      const output = JSON.stringify(warn.mock.calls);
+      expect(output).toContain('missing_visible_output');
+      expect(output).toContain('fixture-request-id');
+      expect(output).not.toContain('fixture prompt');
+      expect(output).not.toContain('thought_signature');
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

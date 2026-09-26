@@ -57,6 +57,7 @@ export class AiProviderRouterService implements AiModelClient {
           provider: 'openrouter',
           reason: error.reason,
           status: error.status,
+          ...(error.diagnostic ? { validation: error.diagnostic } : {}),
         });
       }
     }
@@ -81,6 +82,7 @@ export class AiProviderRouterService implements AiModelClient {
           provider: 'gemini',
           reason: error.reason,
           status: error.status,
+          ...(error.diagnostic ? { validation: error.diagnostic } : {}),
         });
       throw error;
     }
