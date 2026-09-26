@@ -6,6 +6,12 @@ import type {
 
 export const AI_MODEL_CLIENT = Symbol('AI_MODEL_CLIENT');
 
+export type AiProvider = 'openrouter' | 'gemini';
+
+export interface AiModelRequestContext {
+  requestId: string;
+}
+
 export interface AiModelCompletion {
   message: ChatCompletionMessage;
   model: string;
@@ -13,6 +19,7 @@ export interface AiModelCompletion {
   completionTokens: number;
   totalTokens: number;
   providerCostUsdMicros?: number;
+  provider?: AiProvider;
 }
 
 export interface AiModelClient {
@@ -21,6 +28,7 @@ export interface AiModelClient {
     messages: ChatCompletionMessageParam[],
     tools: ChatCompletionTool[],
     signal: AbortSignal,
+    context?: AiModelRequestContext,
   ): Promise<AiModelCompletion>;
 }
 

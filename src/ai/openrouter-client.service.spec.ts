@@ -62,6 +62,7 @@ describe('OpenRouterClientService', () => {
       completionTokens: 4,
       totalTokens: 15,
       providerCostUsdMicros: 12,
+      provider: 'openrouter',
     });
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -215,5 +216,13 @@ describe('OpenRouterClientService', () => {
     await expect(
       service.complete(messages, tools, AbortSignal.timeout(1000)),
     ).rejects.toMatchObject({ reason: AiProviderFailureReason.TIMEOUT });
+  });
+
+  it('does not misclassify local programming errors as provider unavailability', async () => {
+    const { service, create } = fixture();
+    create.mockRejectedValue(new TypeError('fixture internal failure'));
+    await expect(
+      service.complete(messages, tools, AbortSignal.timeout(1000)),
+    ).rejects.toBeInstanceOf(TypeError);
   });
 });

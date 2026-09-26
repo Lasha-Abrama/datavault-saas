@@ -308,6 +308,39 @@ export function validateEnvironment(config: Record<string, unknown>) {
   } else {
     result.OPENROUTER_FALLBACK_MODELS = [];
   }
+  const geminiEnabled = boolean('GEMINI_ENABLED', false);
+  result.GEMINI_ENABLED = geminiEnabled;
+  result.GEMINI_TIMEOUT_MS = integer(
+    'GEMINI_TIMEOUT_MS',
+    30_000,
+    5_000,
+    120_000,
+  );
+  result.GEMINI_MAX_OUTPUT_TOKENS = integer(
+    'GEMINI_MAX_OUTPUT_TOKENS',
+    2_048,
+    64,
+    8_192,
+  );
+  if (geminiEnabled) {
+    required('GEMINI_API_KEY');
+    required('GEMINI_MODEL');
+    const key = text('GEMINI_API_KEY');
+    if (
+      key.length < 20 ||
+      key.length > 256 ||
+      /\s/.test(key) ||
+      /REPLACE_ME|PLACEHOLDER/i.test(key)
+    )
+      throw new Error('GEMINI_API_KEY must be a valid backend API key');
+    const model = text('GEMINI_MODEL').trim();
+    if (
+      !/^gemini-[A-Za-z0-9][A-Za-z0-9._-]{1,99}$/.test(model) ||
+      /REPLACE_ME|PLACEHOLDER/i.test(model)
+    )
+      throw new Error('GEMINI_MODEL must be a valid Gemini model ID');
+    result.GEMINI_MODEL = model;
+  }
   if (awsKeys.some((key) => text(key))) {
     required('AWS_BUCKET_NAME');
     required('AWS_REGION');

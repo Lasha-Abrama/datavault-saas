@@ -41,6 +41,15 @@ export class AiUsage {
   @Prop({ type: String, required: true, immutable: true, maxlength: 200 })
   modelId: string;
 
+  @Prop({
+    type: String,
+    enum: ['openrouter', 'gemini'],
+    default: 'openrouter',
+    required: true,
+    immutable: true,
+  })
+  provider: 'openrouter' | 'gemini';
+
   @Prop({ type: [String], required: true, immutable: true })
   modelsUsed: string[];
 

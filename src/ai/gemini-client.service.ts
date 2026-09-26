@@ -6,7 +6,6 @@ import OpenAI, {
   APIError,
 } from 'openai';
 import type {
-  ChatCompletionCreateParamsNonStreaming,
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat/completions';
@@ -18,34 +17,26 @@ import {
 } from './ai-model-client';
 import { normalizeChatCompletion } from './chat-completion-response';
 
-type OpenRouterRequest = ChatCompletionCreateParamsNonStreaming & {
-  models?: string[];
-  usage: { include: true };
-  provider: { data_collection: 'deny'; zdr?: true };
-};
-
+/** Google's supported OpenAI-compatible endpoint is a direct Gemini API call. */
 @Injectable()
-export class OpenRouterClientService implements AiModelClient {
+export class GeminiClientService implements AiModelClient {
   readonly enabled: boolean;
   private readonly client?: OpenAI;
   private readonly model?: string;
-  private readonly models: string[];
   private readonly maxOutputTokens: number;
 
-  constructor(private readonly config: ConfigService) {
-    this.enabled = config.getOrThrow<boolean>('OPENROUTER_ENABLED');
-    this.models = config.get<string[]>('OPENROUTER_FALLBACK_MODELS') ?? [];
+  constructor(config: ConfigService) {
+    this.enabled = config.get<boolean>('GEMINI_ENABLED') === true;
     this.maxOutputTokens = config.getOrThrow<number>(
-      'OPENROUTER_MAX_OUTPUT_TOKENS',
+      'GEMINI_MAX_OUTPUT_TOKENS',
     );
     if (this.enabled) {
-      this.model = config.getOrThrow<string>('OPENROUTER_MODEL');
+      this.model = config.getOrThrow<string>('GEMINI_MODEL');
       this.client = new OpenAI({
-        apiKey: config.getOrThrow<string>('OPENROUTER_API_KEY'),
-        baseURL: 'https://openrouter.ai/api/v1',
-        timeout: config.getOrThrow<number>('OPENROUTER_TIMEOUT_MS'),
+        apiKey: config.getOrThrow<string>('GEMINI_API_KEY'),
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+        timeout: config.getOrThrow<number>('GEMINI_TIMEOUT_MS'),
         maxRetries: 0,
-        defaultHeaders: { 'X-OpenRouter-Title': 'DataVault AI Assistant' },
       });
     }
   }
@@ -57,28 +48,20 @@ export class OpenRouterClientService implements AiModelClient {
   ): Promise<AiModelCompletion> {
     if (!this.client || !this.model)
       throw new AiProviderFailure(AiProviderFailureReason.UNAVAILABLE);
-    const request: OpenRouterRequest = {
-      model: this.model,
-      ...(this.models.length ? { models: [this.model, ...this.models] } : {}),
-      messages,
-      tools,
-      tool_choice: 'auto',
-      parallel_tool_calls: false,
-      max_completion_tokens: this.maxOutputTokens,
-      stream: false,
-      usage: { include: true },
-      provider: {
-        data_collection: 'deny',
-        ...(this.config.getOrThrow<boolean>('OPENROUTER_REQUIRE_ZDR')
-          ? { zdr: true as const }
-          : {}),
-      },
-    };
     try {
-      const response = await this.client.chat.completions.create(request, {
-        signal,
-      });
-      return normalizeChatCompletion(response, 'openrouter');
+      const response = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: this.withToolNames(messages),
+          tools,
+          tool_choice: 'auto',
+          reasoning_effort: 'low',
+          max_tokens: this.maxOutputTokens,
+          stream: false,
+        },
+        { signal },
+      );
+      return normalizeChatCompletion(response, 'gemini');
     } catch (error) {
       if (error instanceof AiProviderFailure) throw error;
       if (
@@ -108,8 +91,30 @@ export class OpenRouterClientService implements AiModelClient {
       }
       if (error instanceof APIConnectionError)
         throw new AiProviderFailure(AiProviderFailureReason.UNAVAILABLE);
-      // Local programming errors are handled by AiService's internal boundary.
+      // Unexpected local errors remain internal failures in AiService.
       throw error;
     }
+  }
+
+  private withToolNames(messages: ChatCompletionMessageParam[]) {
+    const names = new Map<string, string>();
+    return messages.map((message) => {
+      if (message.role === 'assistant') {
+        for (const call of message.tool_calls ?? [])
+          if (call.type === 'function') names.set(call.id, call.function.name);
+        if (message.tool_calls?.length)
+          // Gemini's compatibility API documents `model` for function-call
+          // history. Preserve its opaque extra_content thought signature.
+          return {
+            ...message,
+            role: 'model',
+          } as unknown as ChatCompletionMessageParam;
+      }
+      if (message.role !== 'tool') return message;
+      const name = names.get(message.tool_call_id);
+      if (!name)
+        throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+      return { ...message, name } as ChatCompletionMessageParam;
+    });
   }
 }

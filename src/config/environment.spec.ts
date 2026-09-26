@@ -28,6 +28,9 @@ describe('validateEnvironment', () => {
       OPENROUTER_MAX_TOOL_ITERATIONS: 3,
       OPENROUTER_REQUIRE_ZDR: false,
       OPENROUTER_FALLBACK_MODELS: [],
+      GEMINI_ENABLED: false,
+      GEMINI_TIMEOUT_MS: 30000,
+      GEMINI_MAX_OUTPUT_TOKENS: 2048,
       AI_MAX_MESSAGE_CHARS: 8000,
       AI_MAX_HISTORY_MESSAGES: 20,
       AI_MAX_CONTEXT_CHARS: 40000,
@@ -155,6 +158,44 @@ describe('validateEnvironment', () => {
       expect(() =>
         validateEnvironment({ ...google, GOOGLE_CALLBACK_URL: callback }),
       ).toThrow('GOOGLE_CALLBACK_URL');
+  });
+});
+
+describe('Gemini environment validation', () => {
+  const gemini = {
+    ...valid,
+    GEMINI_ENABLED: 'true',
+    GEMINI_API_KEY: `AIza${'a'.repeat(36)}`,
+    GEMINI_MODEL: 'gemini-3.5-flash-lite',
+  };
+
+  it('accepts direct Gemini alone or alongside OpenRouter', () => {
+    expect(validateEnvironment(gemini)).toMatchObject({
+      OPENROUTER_ENABLED: false,
+      GEMINI_ENABLED: true,
+      GEMINI_MODEL: 'gemini-3.5-flash-lite',
+    });
+    expect(
+      validateEnvironment({
+        ...gemini,
+        OPENROUTER_ENABLED: 'true',
+        OPENROUTER_API_KEY: `sk-or-v1-${'a'.repeat(48)}`,
+        OPENROUTER_MODEL: 'provider/model',
+      }),
+    ).toMatchObject({ OPENROUTER_ENABLED: true, GEMINI_ENABLED: true });
+  });
+
+  it.each([
+    ['GEMINI_API_KEY', ''],
+    ['GEMINI_API_KEY', 'REPLACE_ME'],
+    ['GEMINI_API_KEY', 'contains whitespace inside'],
+    ['GEMINI_MODEL', ''],
+    ['GEMINI_MODEL', 'REPLACE_ME'],
+    ['GEMINI_MODEL', 'provider/gemini-3.5-flash-lite'],
+    ['GEMINI_TIMEOUT_MS', '4999'],
+    ['GEMINI_MAX_OUTPUT_TOKENS', '9000'],
+  ])('rejects invalid %s without echoing the value', (key, value) => {
+    expect(() => validateEnvironment({ ...gemini, [key]: value })).toThrow(key);
   });
 });
 

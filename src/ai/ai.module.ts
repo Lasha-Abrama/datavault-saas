@@ -10,12 +10,14 @@ import { SubscriptionsDomainModule } from '../subscriptions/subscriptions-domain
 import { AiController } from './ai.controller';
 import { AI_MODEL_CLIENT } from './ai-model-client';
 import { AiService } from './ai.service';
+import { AiProviderRouterService } from './ai-provider-router.service';
 import { AiThrottlerGuard } from './ai-throttler.guard';
 import { AiToolsService } from './ai-tools.service';
 import { aiConversationSchema } from './entities/ai-conversation.entity';
 import { aiMessageSchema } from './entities/ai-message.entity';
 import { aiUsageSchema } from './entities/ai-usage.entity';
 import { OpenRouterClientService } from './openrouter-client.service';
+import { GeminiClientService } from './gemini-client.service';
 
 @Module({
   imports: [
@@ -46,7 +48,9 @@ import { OpenRouterClientService } from './openrouter-client.service';
     AiToolsService,
     AiThrottlerGuard,
     OpenRouterClientService,
-    { provide: AI_MODEL_CLIENT, useExisting: OpenRouterClientService },
+    GeminiClientService,
+    AiProviderRouterService,
+    { provide: AI_MODEL_CLIENT, useExisting: AiProviderRouterService },
   ],
 })
 export class AiModule {}

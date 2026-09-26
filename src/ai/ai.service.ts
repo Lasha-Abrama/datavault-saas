@@ -25,6 +25,7 @@ import {
   AI_MODEL_CLIENT,
   AiModelClient,
   AiModelCompletion,
+  AiProvider,
   AiProviderFailure,
   AiProviderFailureReason,
 } from './ai-model-client';
@@ -42,6 +43,7 @@ interface UsageTotals {
   totalTokens: number;
   providerCostUsdMicros?: number;
   modelsUsed: string[];
+  provider?: AiProvider;
 }
 
 type AiRequestStage =
@@ -113,7 +115,19 @@ export class AiService {
     this.maxToolIterations = config.getOrThrow<number>(
       'OPENROUTER_MAX_TOOL_ITERATIONS',
     );
-    this.timeoutMs = config.getOrThrow<number>('OPENROUTER_TIMEOUT_MS');
+    const openRouterTimeout = config.getOrThrow<number>(
+      'OPENROUTER_TIMEOUT_MS',
+    );
+    const geminiEnabled = config.get<boolean>('GEMINI_ENABLED') === true;
+    const openRouterEnabled =
+      config.get<boolean>('OPENROUTER_ENABLED') !== false;
+    const geminiTimeout = geminiEnabled
+      ? config.getOrThrow<number>('GEMINI_TIMEOUT_MS')
+      : 0;
+    this.timeoutMs =
+      (openRouterEnabled ? openRouterTimeout : 0) +
+      geminiTimeout +
+      (openRouterEnabled && geminiEnabled ? 5_000 : 0);
   }
 
   async chat(actor: AuthenticatedUser, dto: AiChatDto) {
@@ -156,7 +170,12 @@ export class AiService {
       stage = 'history_load';
       const history = await this.contextHistory(actor, conversationId);
       stage = 'provider_call';
-      const result = await this.runAgent(actor, history, dto.message);
+      const result = await this.runAgent(
+        actor,
+        history,
+        dto.message,
+        requestId,
+      );
       const durationMs = Date.now() - startedAt;
       stage = 'persistence_transaction';
       persistenceAttempted = true;
@@ -175,6 +194,7 @@ export class AiService {
         message: 'AI request completed',
         requestId,
         model: result.usage.modelsUsed.at(-1),
+        provider: result.usage.provider,
         promptTokens: result.usage.promptTokens,
         completionTokens: result.usage.completionTokens,
         toolCallCount: result.toolCallCount,
@@ -426,6 +446,7 @@ export class AiService {
     actor: AuthenticatedUser,
     history: ChatCompletionMessageParam[],
     userMessage: string,
+    requestId: string,
   ) {
     const messages: ChatCompletionMessageParam[] = [
       { role: 'system', content: SYSTEM_INSTRUCTION },
@@ -449,6 +470,7 @@ export class AiService {
           messages,
           this.tools.definitions,
           signal,
+          { requestId },
         );
       } catch (error) {
         if (error instanceof AiProviderFailure) throw error;
@@ -580,6 +602,7 @@ export class AiService {
                 conversationId: conversation._id,
                 assistantMessageId,
                 modelId: usage.modelsUsed.at(-1),
+                provider: usage.provider,
                 modelsUsed: usage.modelsUsed,
                 promptTokens: usage.promptTokens,
                 completionTokens: usage.completionTokens,
@@ -709,6 +732,7 @@ export class AiService {
         completion.providerCostUsdMicros,
       );
     total.modelsUsed.push(completion.model);
+    total.provider = completion.provider ?? 'openrouter';
   }
 
   private safeAdd(left: number, right: number) {
@@ -813,6 +837,12 @@ export class AiService {
       (typeof value.providerCostUsdMicros !== 'number' ||
         !Number.isSafeInteger(value.providerCostUsdMicros) ||
         value.providerCostUsdMicros < 0)
+    )
+      throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+    if (
+      value.provider !== undefined &&
+      value.provider !== 'openrouter' &&
+      value.provider !== 'gemini'
     )
       throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
     if (message.tool_calls === undefined) return;

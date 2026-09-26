@@ -17,11 +17,15 @@ import type {
 import { Role } from '../enums/roles.enum';
 import {
   AiModelCompletion,
+  AiModelRequestContext,
   AiProviderFailure,
   AiProviderFailureReason,
 } from './ai-model-client';
 import { AiService } from './ai.service';
+import { AiProviderRouterService } from './ai-provider-router.service';
 import { AiToolFailure } from './ai-tools.service';
+import { GeminiClientService } from './gemini-client.service';
+import { OpenRouterClientService } from './openrouter-client.service';
 
 type Row = Record<string, unknown>;
 const scalar = (value: unknown) =>
@@ -188,12 +192,19 @@ function fixture(overrides: Record<string, unknown> = {}) {
     AI_MAX_CONVERSATIONS_PER_USER: 2,
     OPENROUTER_MAX_TOOL_ITERATIONS: 2,
     OPENROUTER_TIMEOUT_MS: 5000,
+    OPENROUTER_ENABLED: true,
+    GEMINI_ENABLED: false,
     ...overrides,
   };
   const complete = jest
     .fn<
       Promise<AiModelCompletion>,
-      [ChatCompletionMessageParam[], ChatCompletionTool[], AbortSignal]
+      [
+        ChatCompletionMessageParam[],
+        ChatCompletionTool[],
+        AbortSignal,
+        AiModelRequestContext?,
+      ]
     >()
     .mockResolvedValue(answer());
   const client = { enabled: true, complete };
@@ -219,6 +230,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
     tools as never,
     {
       getOrThrow: (key: string) => values[key],
+      get: (key: string) => values[key],
     } as ConfigService,
   );
   const actor = {
@@ -410,6 +422,94 @@ describe('AiService', () => {
       toolCallCount: 1,
       model: 'provider/fallback',
     });
+  });
+
+  it('persists exactly one exchange after Gemini fallback and retains multi-turn context', async () => {
+    const f = fixture({ GEMINI_ENABLED: true, GEMINI_TIMEOUT_MS: 5000 });
+    const primary = {
+      enabled: true,
+      complete: jest
+        .fn()
+        .mockRejectedValue(
+          new AiProviderFailure(AiProviderFailureReason.RATE_LIMIT, 429),
+        ),
+    };
+    const gemini = {
+      enabled: true,
+      complete: jest
+        .fn()
+        .mockResolvedValueOnce({
+          ...answer('', 'gemini-3.5-flash-lite'),
+          provider: 'gemini',
+          providerCostUsdMicros: undefined,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'gemini-call-1',
+                type: 'function',
+                function: { name: 'get_company_statistics', arguments: '{}' },
+              },
+            ],
+          },
+        })
+        .mockResolvedValueOnce({
+          ...answer('You have 12 uploads left.', 'gemini-3.5-flash-lite'),
+          provider: 'gemini',
+          providerCostUsdMicros: undefined,
+        })
+        .mockResolvedValueOnce({
+          ...answer('The quota resets next period.', 'gemini-3.5-flash-lite'),
+          provider: 'gemini',
+          providerCostUsdMicros: undefined,
+        }),
+    };
+    const router = new AiProviderRouterService(
+      primary as unknown as OpenRouterClientService,
+      gemini as unknown as GeminiClientService,
+    );
+    f.complete.mockImplementation((messages, tools, signal, context) =>
+      router.complete(messages, tools, signal, context),
+    );
+
+    const first = await f.service.chat(f.actor, {
+      message: 'How many uploads remain?',
+    });
+    expect(f.tools.execute).toHaveBeenCalledWith(
+      f.actor,
+      'get_company_statistics',
+      '{}',
+    );
+    expect(first.usage).toMatchObject({
+      model: 'gemini-3.5-flash-lite',
+      totalTokens: 28,
+      toolCallCount: 1,
+    });
+    expect(f.usages[0]).toMatchObject({
+      provider: 'gemini',
+      modelId: 'gemini-3.5-flash-lite',
+    });
+    expect(f.usages[0].providerCostUsdMicros).toBeUndefined();
+    expect(f.messages).toHaveLength(2);
+    const second = await f.service.chat(f.actor, {
+      conversationId: String(first.conversation.id),
+      message: 'When does it reset?',
+    });
+    expect(second.usage.model).toBe('gemini-3.5-flash-lite');
+    expect(primary.complete).toHaveBeenCalledTimes(2);
+    expect(gemini.complete).toHaveBeenCalledTimes(3);
+    const geminiCalls: unknown = gemini.complete.mock.calls;
+    expect((geminiCalls as unknown[][])[2][0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: 'You have 12 uploads left.',
+        }),
+      ]),
+    );
+    expect(f.messages).toHaveLength(4);
+    expect(f.usages).toHaveLength(2);
   });
 
   it('rejects repeated, invalid, or excessive tool calls without persisting prompts', async () => {

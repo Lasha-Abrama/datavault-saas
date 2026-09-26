@@ -35,6 +35,13 @@ describe('AI persistence schemas', () => {
     );
   });
 
+  it('records the serving provider without changing old usage semantics', () => {
+    const provider = aiUsageSchema.path('provider');
+    expect(provider.options.enum).toEqual(['openrouter', 'gemini']);
+    expect(provider.options.default).toBe('openrouter');
+    expect(provider.options.immutable).toBe(true);
+  });
+
   it('keeps conversation leases out of serialized responses', () => {
     const transform = aiConversationSchema.get('toJSON')?.transform as (
       document: unknown,
