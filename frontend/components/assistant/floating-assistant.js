@@ -83,8 +83,31 @@ export default function FloatingAssistant() {
         aria-controls="datavault-chat"
         onClick={open ? close : show}
       >
-        {open ? <X size={23} /> : <MessageCircle size={24} />}
-        <span>{open ? "Close" : "Ask DataVault"}</span>
+        <svg className="vault-robot" viewBox="0 0 88 92" fill="none" aria-hidden="true">
+          <ellipse cx="44" cy="85" rx="24" ry="4" fill="#153e35" opacity=".12" />
+          <g className="robot-body">
+            <path d="M44 19V12" stroke="#087e6f" strokeWidth="4" strokeLinecap="round" />
+            <circle cx="44" cy="9" r="5" fill="#a4d9ba" stroke="#087e6f" strokeWidth="2" />
+            <rect x="24" y="57" width="40" height="23" rx="11" fill="#087e6f" />
+            <path d="M30 77V81M58 77V81" stroke="#184b3f" strokeWidth="7" strokeLinecap="round" />
+            <path className="robot-arm" d="M66 61L73 54" stroke="#087e6f" strokeWidth="7" strokeLinecap="round" />
+            <path d="M22 62L17 68" stroke="#087e6f" strokeWidth="7" strokeLinecap="round" />
+            <rect x="10" y="34" width="9" height="16" rx="4.5" fill="#087e6f" />
+            <rect x="69" y="34" width="9" height="16" rx="4.5" fill="#087e6f" />
+            <rect x="16" y="20" width="56" height="44" rx="19" fill="#d8eee2" stroke="#087e6f" strokeWidth="2.5" />
+            <rect x="22" y="27" width="44" height="29" rx="12" fill="#183e36" />
+            {open ? (
+              <path d="M32 36L39 43M39 36L32 43M49 36L56 43M56 36L49 43" stroke="#b9efcc" strokeWidth="2.5" strokeLinecap="round" />
+            ) : (
+              <g className="robot-eyes" fill="#b9efcc">
+                <rect x="31" y="35" width="7" height="10" rx="3.5" />
+                <rect x="50" y="35" width="7" height="10" rx="3.5" />
+              </g>
+            )}
+            <path d="M40 49Q44 52 48 49" stroke="#b9efcc" strokeWidth="2" strokeLinecap="round" />
+            <rect x="38" y="67" width="12" height="5" rx="2.5" fill="#b9efcc" />
+          </g>
+        </svg>
       </button>
     </div>
   );

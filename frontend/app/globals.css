@@ -3096,14 +3096,12 @@ dialog {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 0 22px;
-  height: 56px;
-  border-radius: 28px;
-  color: white;
-  background: #087e6f;
-  box-shadow: 0 8px 25px #0b655a35;
-  border: 1px solid #ffffff25;
+  padding: 0;
+  width: 76px;
+  height: 80px;
+  border-radius: 24px;
+  background: transparent;
+  border: 0;
   transition:
     transform 0.18s,
     background 0.18s;
@@ -3111,12 +3109,37 @@ dialog {
   font-size: 13px;
 }
 .chat-launcher:hover {
-  background: #066b5c;
   transform: translateY(-2px);
+}
+.vault-robot {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 4px 5px #153e351a);
+}
+.robot-body {
+  transform-origin: 44px 77px;
+  transition: transform 200ms ease;
+}
+.chat-launcher:hover .robot-body {
+  transform: rotate(-6deg);
+}
+.robot-eyes {
+  transform-origin: 44px 40px;
+  animation: robot-blink 7s infinite;
+}
+@keyframes robot-blink {
+  0%, 43%, 47%, 100% { transform: scaleY(1); }
+  45% { transform: scaleY(.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .robot-eyes { animation: none; }
+  .robot-body, .chat-launcher { transition: none; }
+  .chat-launcher:hover, .chat-launcher:hover .robot-body { transform: none; }
 }
 .floating-chat-panel {
   width: 430px;
-  height: min(690px, calc(100dvh - 115px));
+  height: min(690px, calc(100dvh - 142px));
   background: #fff;
   border: 1px solid #e0e8dc;
   border-radius: 24px;
@@ -3374,8 +3397,8 @@ dialog {
     gap: 10px;
   }
   .chat-launcher {
-    width: 54px;
-    height: 54px;
+    width: 62px;
+    height: 66px;
     padding: 0;
   }
   .chat-launcher > span {
@@ -3383,7 +3406,7 @@ dialog {
   }
   .floating-chat-panel {
     width: calc(100vw - 28px);
-    height: min(680px, calc(100dvh - 98px));
+    height: min(680px, calc(100dvh - 116px));
     border-radius: 21px;
   }
   .compact-assistant .chat-composer textarea {
