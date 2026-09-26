@@ -4,33 +4,12 @@ import {
   AiProvider,
   AiProviderFailure,
   AiProviderFailureReason,
+  AiResponseDiagnostic,
+  AiResponseValidationCode,
 } from './ai-model-client';
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function validMessage(value: unknown): value is AiModelCompletion['message'] {
-  if (!record(value) || value.role !== 'assistant') return false;
-  if (typeof value.content !== 'string' && value.content !== null) return false;
-  if (value.tool_calls === undefined) return true;
-  if (!Array.isArray(value.tool_calls)) return false;
-  return value.tool_calls.every((toolCall) => {
-    if (
-      !record(toolCall) ||
-      toolCall.type !== 'function' ||
-      typeof toolCall.id !== 'string' ||
-      !toolCall.id ||
-      toolCall.id.length > 256 ||
-      !record(toolCall.function)
-    )
-      return false;
-    return (
-      typeof toolCall.function.name === 'string' &&
-      /^[A-Za-z0-9_-]{1,128}$/.test(toolCall.function.name) &&
-      typeof toolCall.function.arguments === 'string'
-    );
-  });
 }
 
 function safeInteger(value: unknown) {
@@ -45,6 +24,44 @@ function costMicros(value: unknown) {
   return Number.isSafeInteger(micros) ? micros : undefined;
 }
 
+function diagnostic(
+  code: AiResponseValidationCode,
+  choice: unknown,
+  message: unknown,
+): AiProviderFailure {
+  const rawReason = record(choice) ? choice.finish_reason : undefined;
+  const finishReason: AiResponseDiagnostic['finishReason'] =
+    rawReason === 'stop' || rawReason === 'length' || rawReason === 'tool_calls'
+      ? rawReason
+      : rawReason === undefined || rawReason === null
+        ? 'missing'
+        : 'other';
+  const content = record(message) ? message.content : undefined;
+  const contentType: AiResponseDiagnostic['contentType'] =
+    content === undefined
+      ? 'missing'
+      : content === null
+        ? 'null'
+        : Array.isArray(content)
+          ? 'array'
+          : typeof content === 'string' ||
+              typeof content === 'number' ||
+              typeof content === 'boolean'
+            ? (typeof content as 'string' | 'number' | 'boolean')
+            : 'object';
+  const calls = record(message) ? message.tool_calls : undefined;
+  return new AiProviderFailure(
+    AiProviderFailureReason.INVALID_RESPONSE,
+    undefined,
+    {
+      code,
+      finishReason,
+      contentType,
+      toolCallCount: Array.isArray(calls) ? Math.min(calls.length, 100) : 0,
+    },
+  );
+}
+
 /** Validate SDK data at runtime; TypeScript's response type is not a trust boundary. */
 export function normalizeChatCompletion(
   response: ChatCompletion,
@@ -52,26 +69,70 @@ export function normalizeChatCompletion(
 ): AiModelCompletion {
   const runtime = response as unknown;
   if (!record(runtime))
-    throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
-  const choices: unknown = runtime.choices;
-  const choice = Array.isArray(choices) ? (choices as unknown[])[0] : null;
-  const rawMessage = record(choice) ? choice.message : null;
-  // Google's compatibility API documents `model` for function-call responses.
-  // Normalize only that documented Gemini role; every other shape stays invalid.
-  const message =
+    throw diagnostic('invalid_envelope', undefined, undefined);
+  if (!Array.isArray(runtime.choices) || runtime.choices.length === 0)
+    throw diagnostic('missing_choices', undefined, undefined);
+  const choice: unknown = runtime.choices[0];
+  const rawMessage = record(choice) ? choice.message : undefined;
+  if (!record(rawMessage))
+    throw diagnostic('missing_message', choice, rawMessage);
+  // Google's compatibility API documents `model` on function-call messages.
+  // Keep the provider-neutral internal role, while retaining opaque extra_content.
+  const role =
     provider === 'gemini' &&
-    record(rawMessage) &&
     rawMessage.role === 'model' &&
-    Array.isArray(rawMessage.tool_calls)
-      ? { ...rawMessage, role: 'assistant' }
-      : rawMessage;
+    Array.isArray(rawMessage.tool_calls) &&
+    rawMessage.tool_calls.length > 0
+      ? 'assistant'
+      : rawMessage.role;
+  if (role !== 'assistant')
+    throw diagnostic('invalid_message_role', choice, rawMessage);
+  const calls = rawMessage.tool_calls;
+  if (calls !== undefined) {
+    if (!Array.isArray(calls))
+      throw diagnostic('malformed_tool_call', choice, rawMessage);
+    for (const call of calls) {
+      if (
+        !record(call) ||
+        call.type !== 'function' ||
+        typeof call.id !== 'string' ||
+        !call.id ||
+        call.id.length > 256 ||
+        !record(call.function) ||
+        typeof call.function.name !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(call.function.name)
+      )
+        throw diagnostic('malformed_tool_call', choice, rawMessage);
+      if (typeof call.function.arguments !== 'string')
+        throw diagnostic('invalid_tool_arguments', choice, rawMessage);
+    }
+  }
+  const hasCalls = Array.isArray(calls) && calls.length > 0;
+  // Google's documented OpenAI-compatible function-call response omits
+  // `content` entirely. Accept that omission only alongside validated calls.
+  const content =
+    provider === 'gemini' && rawMessage.content === undefined && hasCalls
+      ? null
+      : rawMessage.content;
+  if (typeof content !== 'string' && content !== null)
+    throw diagnostic(
+      content === undefined ? 'missing_visible_output' : 'invalid_content',
+      choice,
+      rawMessage,
+    );
+  if (!hasCalls && (content === null || !content.trim()))
+    throw diagnostic('missing_visible_output', choice, rawMessage);
   if (
-    !validMessage(message) ||
     typeof runtime.model !== 'string' ||
     !runtime.model.trim() ||
     runtime.model.length > 200
   )
-    throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+    throw diagnostic('missing_model', choice, rawMessage);
+  const message = {
+    ...rawMessage,
+    role: 'assistant',
+    content,
+  } as AiModelCompletion['message'];
   const usage = record(runtime.usage) ? runtime.usage : null;
   return {
     message,

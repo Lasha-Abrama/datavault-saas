@@ -28,6 +28,7 @@ import {
   AiProvider,
   AiProviderFailure,
   AiProviderFailureReason,
+  AiResponseValidationCode,
 } from './ai-model-client';
 import { AiToolFailure, AiToolsService } from './ai-tools.service';
 
@@ -212,6 +213,7 @@ export class AiService {
           requestId,
           reason: error.reason,
           status: error.status,
+          ...(error.diagnostic ? { validation: error.diagnostic } : {}),
         });
         throw this.providerException(error.reason);
       }
@@ -486,12 +488,13 @@ export class AiService {
       const toolCalls = completion.message.tool_calls ?? [];
       if (!toolCalls.length) {
         const content = completion.message.content?.trim();
-        if (!content || content.length > 50_000)
-          throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+        if (!content) throw this.invalidCompletion('missing_visible_output');
+        if (content.length > 50_000)
+          throw this.invalidCompletion('response_too_large');
         return { content, usage, toolCallCount };
       }
       if (iteration === this.maxToolIterations)
-        throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+        throw this.invalidCompletion('tool_iteration_limit');
       messages.push(completion.message);
       for (const toolCall of toolCalls) {
         if (toolCall.type !== 'function') throw new AiToolFailure();
@@ -536,7 +539,7 @@ export class AiService {
         });
       }
     }
-    throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+    throw this.invalidCompletion('tool_iteration_limit');
   }
 
   private async persistExchange(
@@ -742,10 +745,10 @@ export class AiService {
       !Number.isSafeInteger(right) ||
       right < 0
     )
-      throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+      throw this.invalidCompletion('invalid_usage');
     const value = left + right;
     if (!Number.isSafeInteger(value) || value < 0)
-      throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+      throw this.invalidCompletion('invalid_usage');
     return value;
   }
 
@@ -815,7 +818,7 @@ export class AiService {
     value: unknown,
   ): asserts value is AiModelCompletion {
     if (!this.record(value) || !this.record(value.message))
-      throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+      throw this.invalidCompletion('missing_message');
     const message = value.message;
     if (
       message.role !== 'assistant' ||
@@ -824,30 +827,36 @@ export class AiService {
       !value.model.trim() ||
       value.model.length > 200
     )
-      throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+      throw this.invalidCompletion(
+        message.role !== 'assistant'
+          ? 'invalid_message_role'
+          : typeof message.content !== 'string' && message.content !== null
+            ? 'invalid_content'
+            : 'missing_model',
+      );
     for (const count of [
       value.promptTokens,
       value.completionTokens,
       value.totalTokens,
     ])
       if (!Number.isSafeInteger(count) || Number(count) < 0)
-        throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+        throw this.invalidCompletion('invalid_usage');
     if (
       value.providerCostUsdMicros !== undefined &&
       (typeof value.providerCostUsdMicros !== 'number' ||
         !Number.isSafeInteger(value.providerCostUsdMicros) ||
         value.providerCostUsdMicros < 0)
     )
-      throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+      throw this.invalidCompletion('invalid_usage');
     if (
       value.provider !== undefined &&
       value.provider !== 'openrouter' &&
       value.provider !== 'gemini'
     )
-      throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+      throw this.invalidCompletion('invalid_envelope');
     if (message.tool_calls === undefined) return;
     if (!Array.isArray(message.tool_calls))
-      throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+      throw this.invalidCompletion('malformed_tool_call');
     for (const toolCall of message.tool_calls)
       if (
         !this.record(toolCall) ||
@@ -858,7 +867,15 @@ export class AiService {
         typeof toolCall.function.name !== 'string' ||
         typeof toolCall.function.arguments !== 'string'
       )
-        throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
+        throw this.invalidCompletion('malformed_tool_call');
+  }
+
+  private invalidCompletion(code: AiResponseValidationCode) {
+    return new AiProviderFailure(
+      AiProviderFailureReason.INVALID_RESPONSE,
+      undefined,
+      { code },
+    );
   }
 
   private conversationObjectId(
