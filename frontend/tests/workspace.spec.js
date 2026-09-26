@@ -148,15 +148,65 @@ async function fixture(page, role = "owner") {
     });
   });
 }
+test("redesigned directories and forms remain within desktop and mobile viewports", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/login");
+  await expect(
+    page.getByRole("heading", { name: "Welcome back." }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign in to your workspace" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/redesign-login.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await fixture(page);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const [route, heading] of [
+      ["", "The big picture."],
+      ["/files", "The file vault"],
+      ["/employees", "Your people"],
+      ["/billing", "Room to grow."],
+      ["/settings", "Workspace settings"],
+    ]) {
+      await page.goto(`/dashboard${route}`);
+      await expect(
+        page.getByRole("heading", { name: heading, exact: true }),
+      ).toBeVisible();
+      await expect(page.locator(".loading-state")).toHaveCount(0);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        `${route} at ${width}px`,
+      ).toBeTruthy();
+      await page.screenshot({
+        path: `test-results/redesign-${route.slice(1) || "overview"}-${width}.png`,
+        fullPage: true,
+        animations: "disabled",
+      });
+    }
+  }
+});
 test("unauthenticated routes redirect and registration renders without overflow", async ({
   page,
 }) => {
   await page.goto("/dashboard/files");
   await expect(page).toHaveURL(/\/login/);
+  await expect(page.getByRole("button", { name: "Sign in to your workspace" })).toBeVisible();
+  const loginHeadline = await page.locator(".story-body h1").boundingBox();
   await page.goto("/register");
   await expect(
     page.getByRole("heading", { name: "A home for your data." }),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create your workspace", exact: true })).toBeVisible();
+  const signupHeadline = await page.locator(".story-body h1").boundingBox();
+  expect(Math.abs(signupHeadline.y - loginHeadline.y)).toBeLessThanOrEqual(1);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
@@ -174,10 +224,11 @@ test("owner workspace uses real response shape, filters files, and saves permiss
   await fixture(page);
   await page.goto("/dashboard");
   await expect(
-    page.getByRole("heading", { name: "Your workspace, at a glance." }),
+    page.getByRole("heading", { name: "The big picture." }),
   ).toBeVisible();
   await page.screenshot({
     path: "test-results/overview-desktop.png",
+    animations: "disabled",
     fullPage: true,
   });
   await page.goto("/dashboard/files");
@@ -252,7 +303,7 @@ test("mobile navigation and billing fit viewport", async ({ page }) => {
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("link", { name: "Billing", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "A plan that grows with you." }),
+    page.getByRole("heading", { name: "Room to grow." }),
   ).toBeVisible();
   expect(
     await page.evaluate(
@@ -261,6 +312,7 @@ test("mobile navigation and billing fit viewport", async ({ page }) => {
   ).toBeTruthy();
   await page.screenshot({
     path: "test-results/billing-mobile.png",
+    animations: "disabled",
     fullPage: true,
   });
 });
@@ -343,7 +395,7 @@ test("AI conversations persist, continue and delete through documented endpoints
   await expect(
     page.getByRole("button", { name: "Send", exact: true }),
   ).toBeDisabled();
-  await page.getByRole("button", {name:"History", exact:true}).click();
+  await page.getByRole("button", { name: "History", exact: true }).click();
   await page
     .getByRole("button", { name: "Delete conversation: Usage question" })
     .click();
@@ -435,4 +487,3 @@ test("floating chat opens from login and preserves a draft across workspace navi
   expect(panel.y).toBeGreaterThanOrEqual(0);
   expect(panel.y + panel.height).toBeLessThanOrEqual(844);
 });
-

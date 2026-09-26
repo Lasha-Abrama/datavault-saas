@@ -1,5 +1,6 @@
 import FloatingAssistant from "@/components/assistant/floating-assistant";
 import "./globals.css";
+import "./workspace-design.css";
 import { AuthProvider } from "@/lib/auth";
 import { ToastProvider } from "@/components/ui";
 export const metadata = {

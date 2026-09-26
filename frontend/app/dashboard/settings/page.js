@@ -23,9 +23,9 @@ export default function Settings() {
   return (
     <>
       <PageHeading
-        eyebrow="THE DETAILS THAT MAKE IT YOURS"
+        eyebrow="WORKSPACE / SETTINGS"
         title="Workspace settings"
-        description="A little housekeeping for your company, your profile, and your peace of mind."
+        description="Your profile, company details, and account security."
       />
       <div className="tabs" aria-label="Settings sections">
         {["Profile", "Security", "Account"].map((t) => (
@@ -205,7 +205,7 @@ function SettingsSection({ title, description, children }) {
         <h2>{title}</h2>
         <p>{description}</p>
       </div>
-      <div className="panel settings-form">{children}</div>
+      <div className="settings-form">{children}</div>
     </section>
   );
 }

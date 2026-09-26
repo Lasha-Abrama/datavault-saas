@@ -17,6 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "strict": true,
     "strictPropertyInitialization": false,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "rootDir": "./src",
+    "ignoreDeprecations": "6.0"
   }
 }

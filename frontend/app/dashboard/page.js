@@ -46,8 +46,8 @@ export default function Overview() {
   return (
     <>
       <PageHeading
-        eyebrow="A CLEARER PICTURE"
-        title="Your workspace, at a glance."
+        eyebrow="WORKSPACE / OVERVIEW"
+        title="The big picture."
         description={`Welcome back${user.fullName ? `, ${user.fullName.split(" ")[0]}` : ""}. Here’s what’s happening at ${company?.name || "your company"}.`}
         action={
           <Link className="button" href="/dashboard/files">
@@ -63,6 +63,25 @@ export default function Overview() {
         <>
           <section className="overview-grid">
             <div className="usage-hero">
+              <svg
+                className="overview-orbit"
+                viewBox="0 0 320 300"
+                fill="none"
+                aria-hidden="true"
+              >
+                <g>
+                  <ellipse
+                    cx="160"
+                    cy="150"
+                    rx="125"
+                    ry="83"
+                    transform="rotate(-35 160 150)"
+                    stroke="currentColor"
+                  />
+                  <circle cx="61" cy="224" r="5" fill="currentColor" />
+                  <circle cx="264" cy="83" r="8" fill="currentColor" />
+                </g>
+              </svg>
               <div className="between">
                 <span className="eyebrow">THIS BILLING PERIOD</span>
                 <Badge>{s.subscription.planName} plan</Badge>
@@ -71,7 +90,7 @@ export default function Overview() {
                 {usage.successfulUploads.toLocaleString()}
                 <span>/ {usage.includedAllowance.toLocaleString()}</span>
               </div>
-              <h2>Files added. Knowledge connected.</h2>
+              <h2>Files processed this period</h2>
               <Progress
                 value={usage.successfulUploads}
                 max={usage.includedAllowance}
@@ -84,7 +103,6 @@ export default function Overview() {
                 </span>
                 <span>Renews {date(usage.endsAt)}</span>
               </div>
-              <div className="usage-grid-art" aria-hidden="true" />
             </div>
             <div className="overview-side">
               <div className="mini-stat">
@@ -138,10 +156,10 @@ export default function Overview() {
         </>
       )}
       <div className="workspace-columns">
-        <section className="panel recent-files">
+        <section className="recent-files">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">THE LATEST IN YOUR VAULT</span>
+              <span className="eyebrow">01 / THE VAULT</span>
               <h2>Recent files</h2>
             </div>
             <Link className="text-link" href="/dashboard/files">
@@ -174,9 +192,8 @@ export default function Overview() {
         </section>
         <aside className="workspace-aside">
           <section className="quick-actions">
-            <span className="eyebrow">MAKE YOURSELF AT HOME</span>
-            <h2>A little more connected.</h2>
-            <p>Keep your information organized and your team in sync.</p>
+            <span className="eyebrow">02 / NEXT STEPS</span>
+            <h2>Keep things moving.</h2>
             <Link href="/dashboard/files">
               <Files size={18} />
               <span>

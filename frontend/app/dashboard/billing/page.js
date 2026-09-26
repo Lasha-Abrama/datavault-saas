@@ -35,9 +35,9 @@ export default function Billing() {
   return (
     <>
       <PageHeading
-        eyebrow="ROOM FOR WHAT’S NEXT"
-        title="A plan that grows with you."
-        description="Know your usage. Understand your costs. Keep moving forward."
+        eyebrow="WORKSPACE / BILLING"
+        title="Room to grow."
+        description="Your plan, your usage, and exactly what it adds up to."
       />
       <Alert type="info">
         Plan changes update your workspace’s subscription. Payments are not
@@ -101,7 +101,7 @@ export default function Billing() {
               </p>
             </div>
           </section>
-          <section className="panel cost-panel">
+          <section className="cost-panel">
             <div>
               <span className="eyebrow">CURRENT PERIOD ESTIMATE</span>
               <h2>
@@ -144,24 +144,26 @@ export default function Billing() {
         </>
       )}
       <div className="section-heading">
-        <span className="eyebrow">BUILT AROUND YOUR WORKSPACE</span>
-        <h2>More space for your next chapter.</h2>
-        <p>Compare the plans. Find your fit.</p>
+        <span className="eyebrow">PLAN DIRECTORY</span>
+        <h2>Choose your capacity.</h2>
       </div>
       {plans.loading ? (
         <Loading label="Loading available plans" />
       ) : plans.error ? (
         <ErrorState error={plans.error} retry={plans.reload} />
       ) : (
-        <section className="plan-grid">
+        <section
+          className="plan-directory"
+          aria-label="Available subscription plans"
+        >
           {plans.data.map((plan, i) => {
             const current = b?.plan.code === plan.code;
             return (
               <article
-                className={`plan-card ${current ? "current" : ""}`}
+                className={`plan-row ${current ? "current" : ""}`}
                 key={plan.code}
               >
-                <div className="between">
+                <div className="plan-identity">
                   <span className="plan-index">0{i + 1}</span>
                   {current && (
                     <Badge tone="green">
@@ -169,15 +171,15 @@ export default function Billing() {
                       Your plan
                     </Badge>
                   )}
+                  <h3>{plan.name}</h3>
+                  <p>
+                    {plan.code === "free"
+                      ? "A focused start for your data."
+                      : plan.code === "basic"
+                        ? "A shared space for a growing team."
+                        : "Built for your next stage of scale."}
+                  </p>
                 </div>
-                <h3>{plan.name}</h3>
-                <p>
-                  {plan.code === "free"
-                    ? "A focused start for your data."
-                    : plan.code === "basic"
-                      ? "A shared space for a growing team."
-                      : "Built for your next stage of scale."}
-                </p>
                 <div className="plan-price">
                   {money(
                     plan.code === "basic"

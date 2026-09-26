@@ -2,17 +2,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import {
-  ArrowRight,
-  ArrowUpRight,
-  Check,
-  Layers3,
-  LockKeyhole,
-  ShieldCheck,
-} from "lucide-react";
+import { ArrowRight, ArrowUpRight, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { request } from "@/lib/api";
 import { Alert, Button, Field, Logo, Loading } from "@/components/ui";
+import LivingVault from "./living-vault";
 const titles = {
   login: ["Welcome back.", "Your company’s data. Right where you left it."],
   register: [
@@ -129,49 +123,23 @@ export default function AuthPage({ mode }) {
   return (
     <main className="auth-layout">
       <section className="auth-story">
+        <LivingVault />
         <Link href="/login" aria-label="DataVault home">
           <Logo light />
         </Link>
         <div className="story-body">
-          <span className="eyebrow">ONE WORKSPACE. EVERY POSSIBILITY.</span>
+          <span className="eyebrow">THE COMPANY DATA WORKSPACE</span>
           <h1>
-            Your data. <br />
-            Your people. <br />
-            <em>Perfectly connected.</em>
+            Everything <br />
+            in its <br />
+            <em>right place.</em>
           </h1>
           <p>
             A considered space for the information that moves your business
             forward.
           </p>
-          <div className="vault-art" aria-hidden="true">
-            <div className="orbit orbit-one" />
-            <div className="orbit orbit-two" />
-            <div className="vault-core">
-              <Layers3 size={54} strokeWidth={1} />
-            </div>
-            <span className="art-label art-one">
-              <span className="mini-dot" /> COMPANY WORKSPACE
-            </span>
-            <span className="art-label art-two">
-              <LockKeyhole size={13} /> ACCESS, UNDER CONTROL
-            </span>
-            <span className="art-cross">+</span>
-          </div>
-          <div className="story-features">
-            <span>
-              <Check size={15} /> One source of truth
-            </span>
-            <span>
-              <Check size={15} /> Thoughtful access
-            </span>
-            <span>
-              <Check size={15} /> Room to grow
-            </span>
-          </div>
         </div>
-        <footer>
-          BUILT FOR THE WAY YOUR COMPANY WORKS <span>01 — DV</span>
-        </footer>
+        <footer>BUILT FOR THE WAY YOUR COMPANY WORKS</footer>
       </section>
       <section className="auth-form-side">
         <div className="auth-top">
@@ -186,8 +154,13 @@ export default function AuthPage({ mode }) {
           </Link>
         </div>
         <div className="auth-form-wrap">
-          <span className="auth-symbol">
-            <LockKeyhole size={23} />
+          <span className="eyebrow auth-step">
+            DATAVAULT /{" "}
+            {mode === "register"
+              ? "CREATE WORKSPACE"
+              : mode === "login"
+                ? "SIGN IN"
+                : "ACCOUNT ACCESS"}
           </span>
           <h2>{titles[mode][0]}</h2>
           <p className="auth-subtitle">{titles[mode][1]}</p>
