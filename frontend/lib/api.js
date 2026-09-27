@@ -41,6 +41,28 @@ export class ApiError extends Error {
     );
     this.status = status;
     this.code = typeof body?.code === "string" ? body.code : "";
+    if (context.startsWith("/payments/")) {
+      if (
+        status === 503 &&
+        body?.message === "Test Mode payments are not configured"
+      ) {
+        this.code = "payments_disabled";
+        this.message =
+          "Stripe test payments are not enabled on the server yet.";
+      } else if (status === 503) {
+        this.message =
+          "Billing is temporarily unavailable. Refresh the payment status before trying again.";
+      } else if (status === 409) {
+        this.message =
+          "Another billing action is pending, or your subscription has changed. Refresh its status before trying again.";
+      } else if (status === 403) {
+        this.message =
+          "This billing action requires administrator access and a plan that fits your employees and pending invitations.";
+      } else if (status === 400) {
+        this.message =
+          "This billing action is not available for the selected plan. Refresh your subscription and try again.";
+      }
+    }
     if (context.startsWith("/ai/")) {
       const aiMessages = {
         ai_disabled: "The AI assistant is not enabled on the server yet.",

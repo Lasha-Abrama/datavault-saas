@@ -17,6 +17,13 @@ import {
   useToast,
 } from "@/components/ui";
 import { useWorkspace } from "@/components/layout/shell";
+import PaymentPanel from "@/components/billing/payment-panel";
+import {
+  getPaymentState,
+  hasStripeSubscription,
+  openStripe,
+  planName,
+} from "@/lib/payments";
 export default function Billing() {
   const { isAdmin } = useAuth(),
     workspace = useWorkspace(),
@@ -31,6 +38,19 @@ export default function Billing() {
     );
   const [chosen, setChosen] = useState(null),
     b = billing.data;
+  const payments = useResource(
+    (signal) => (isAdmin ? getPaymentState(signal) : Promise.resolve(null)),
+    [isAdmin],
+  );
+  const assignmentMode = payments.error?.code === "payments_disabled";
+  const stripeReady = payments.data?.mode === "test";
+  const managed = hasStripeSubscription(payments.data);
+  const pending = payments.data?.pendingPlanCode;
+  const setup = chosen && stripeReady && !managed && chosen.code !== "free";
+  function reloadBilling() {
+    billing.reload();
+    workspace.reload();
+  }
   const rank = { free: 0, basic: 1, premium: 2 };
   return (
     <>
@@ -40,8 +60,11 @@ export default function Billing() {
         description="Your plan, your usage, and exactly what it adds up to."
       />
       <Alert type="info">
-        Plan changes update your workspace’s subscription. Payments are not
-        currently collected. Amounts below are internal estimates, not invoices.
+        {stripeReady
+          ? "Stripe is in test mode. No real money is charged. Checkout saves a test payment method; invoices are separate from the internal estimates below."
+          : assignmentMode
+            ? "Stripe test payments are disabled. Plan changes here update your workspace without collecting payment. Amounts below are internal estimates, not invoices."
+            : "Amounts below are internal usage estimates, not invoices. Your administrator manages payment methods and plan changes."}
       </Alert>
       {billing.loading ? (
         <Loading label="Loading billing details" />
@@ -143,6 +166,9 @@ export default function Billing() {
           )}
         </>
       )}
+      {isAdmin && (
+        <PaymentPanel resource={payments} onChanged={reloadBilling} />
+      )}
       <div className="section-heading">
         <span className="eyebrow">PLAN DIRECTORY</span>
         <h2>Choose your capacity.</h2>
@@ -158,6 +184,14 @@ export default function Billing() {
         >
           {plans.data.map((plan, i) => {
             const current = b?.plan.code === plan.code;
+            const keepPlan =
+              current &&
+              managed &&
+              (pending || payments.data?.cancelAtPeriodEnd);
+            const connectPlan =
+              current && stripeReady && !managed && plan.code !== "free";
+            const queued = pending === plan.code;
+            const blockedByPending = pending && !current;
             return (
               <article
                 className={`plan-row ${current ? "current" : ""}`}
@@ -232,12 +266,25 @@ export default function Billing() {
                           : "secondary"
                     }
                     className="full"
-                    disabled={current || !b}
+                    disabled={
+                      !b ||
+                      payments.loading ||
+                      (!stripeReady && !assignmentMode) ||
+                      (current && !keepPlan && !connectPlan) ||
+                      queued ||
+                      blockedByPending
+                    }
                     onClick={() => setChosen(plan)}
                   >
-                    {current
-                      ? "Current plan"
-                      : `${rank[plan.code] > rank[b?.plan.code] ? "Upgrade" : "Downgrade"} to ${plan.name}`}
+                    {keepPlan
+                      ? `Keep ${plan.name}`
+                      : connectPlan
+                        ? `Connect ${plan.name} billing`
+                        : queued
+                          ? "Change requested"
+                          : current
+                            ? "Current plan"
+                            : `${rank[plan.code] > rank[b?.plan.code] ? "Upgrade" : "Downgrade"} to ${plan.name}`}
                     {!current && <ArrowRight size={15} />}
                   </Button>
                 ) : (
@@ -252,19 +299,45 @@ export default function Billing() {
       )}
       {chosen && (
         <Confirm
-          title={`Change to ${chosen.name}?`}
-          description={`Your workspace will use the ${chosen.name} plan with ${chosen.includedFilesPerMonth.toLocaleString()} included files per month. ${chosen.code === "basic" ? "$5 per employee per month." : `${money(chosen.basePriceCents)} monthly base.`} No payment will be collected. Downgrades must accommodate employees and pending invitations.`}
-          label="Confirm plan change"
+          title={
+            setup
+              ? `Set up ${chosen.name} billing?`
+              : chosen.code === b?.plan.code
+                ? `Keep ${chosen.name}?`
+                : `Change to ${chosen.name}?`
+          }
+          description={`${chosen.name} includes ${chosen.includedFilesPerMonth.toLocaleString()} files per month. ${chosen.code === "basic" ? "$5 per employee per month." : `${money(chosen.basePriceCents)} monthly base.`} ${assignmentMode ? "This is a workspace plan assignment; no payment is collected." : setup ? "You’ll continue to Stripe test Checkout to save a payment method. Checkout does not collect a payment immediately. Return here to verify your subscription." : chosen.code === b?.plan.code ? "This requests keeping your current plan and clearing its scheduled change." : "Stripe test mode: no real charges. Downgrades take effect at the billing-period boundary; upgrades can take effect earlier. No prorated charge is applied."} Downgrades must fit your employees and pending invitations.`}
+          label={setup ? "Continue to Stripe" : "Confirm plan change"}
           dangerous={false}
           onClose={() => setChosen(null)}
           onConfirm={async () => {
-            await request("/subscriptions/current", {
-              method: "PATCH",
-              body: { planCode: chosen.code },
-            });
-            toast(`Your plan is now ${chosen.name}`);
-            billing.reload();
-            workspace.reload();
+            if (setup) {
+              await openStripe("checkout", chosen.code);
+              return;
+            }
+            const result = await request(
+              assignmentMode
+                ? "/subscriptions/current"
+                : chosen.code === "free"
+                  ? "/payments/cancel"
+                  : "/payments/plan",
+              {
+                method: assignmentMode ? "PATCH" : "POST",
+                body:
+                  !assignmentMode && chosen.code === "free"
+                    ? {}
+                    : { planCode: chosen.code },
+              },
+            );
+            toast(
+              assignmentMode
+                ? `Workspace plan changed to ${chosen.name}`
+                : result.pendingPlanCode
+                  ? `Change to ${planName(result.pendingPlanCode)} requested${result.effectiveAt ? ` for ${date(result.effectiveAt)}` : ""}`
+                  : "Plan request completed. Payment status is being refreshed.",
+            );
+            reloadBilling();
+            payments.reload();
           }}
         />
       )}

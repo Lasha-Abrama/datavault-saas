@@ -7,6 +7,11 @@ import { useAuth } from "@/lib/auth";
 import { request } from "@/lib/api";
 import { Alert, Button, Field, Logo, Loading } from "@/components/ui";
 import LivingVault from "./living-vault";
+import { paymentReturnPaths } from "@/lib/payments";
+function loginDestination() {
+  const next = new URLSearchParams(window.location.search).get("next");
+  return paymentReturnPaths.includes(next) ? next : "/dashboard";
+}
 const titles = {
   login: ["Welcome back.", "Your company’s data. Right where you left it."],
   register: [
@@ -37,7 +42,7 @@ export default function AuthPage({ mode }) {
   const captured = useRef(false);
   useEffect(() => {
     if (!loading && user && ["login", "register"].includes(mode))
-      router.replace("/dashboard");
+      router.replace(loginDestination());
   }, [user, loading, mode, router]);
   useEffect(() => {
     if (captured.current) return;
@@ -58,7 +63,7 @@ export default function AuthPage({ mode }) {
     try {
       if (mode === "login") {
         await login(values);
-        router.replace("/dashboard");
+        router.replace(loginDestination());
       }
       if (mode === "register") {
         await request("/auth/sign-up", {

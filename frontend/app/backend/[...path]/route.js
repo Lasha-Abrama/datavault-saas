@@ -1,5 +1,7 @@
 // A fixed upstream and explicit route allowlist prevent this from becoming an open proxy.
 const routes = [
+  ["GET", /^payments\/current$/],
+  ["POST", /^payments\/(checkout|portal|plan|cancel|reconcile)$/],
   ["POST", /^ai\/chat$/],
   ["GET", /^ai\/conversations$/],
   ["GET", /^ai\/conversations\/[a-f\d]{24}$/i],

@@ -23,6 +23,7 @@ import { useResource } from "@/lib/hooks";
 import { initials } from "@/lib/utils";
 import { Button, ErrorState, Loading, Logo, Progress } from "@/components/ui";
 import DataAtmosphere from "./data-atmosphere";
+import { paymentReturnPaths } from "@/lib/payments";
 const WorkspaceContext = createContext(null);
 export const useWorkspace = () => useContext(WorkspaceContext);
 const navigation = [
@@ -34,10 +35,16 @@ const navigation = [
 ];
 export default function Shell({ children }) {
   const auth = useAuth(),
-    router = useRouter();
+    router = useRouter(),
+    pathname = usePathname();
   useEffect(() => {
-    if (!auth.loading && !auth.user && !auth.error) router.replace("/login");
-  }, [auth.loading, auth.user, auth.error, router]);
+    if (!auth.loading && !auth.user && !auth.error)
+      router.replace(
+        paymentReturnPaths.includes(pathname)
+          ? `/login?next=${encodeURIComponent(pathname)}`
+          : "/login",
+      );
+  }, [auth.loading, auth.user, auth.error, router, pathname]);
   if (auth.loading)
     return (
       <main className="center-screen">
@@ -101,8 +108,18 @@ function AuthenticatedShell({ children }) {
             key={href}
             href={href}
             onClick={() => setOpen(false)}
-            aria-current={pathname === href ? "page" : undefined}
-            className={pathname === href ? "active" : ""}
+            aria-current={
+              pathname === href ||
+              (label === "Billing" && pathname.startsWith("/payments/"))
+                ? "page"
+                : undefined
+            }
+            className={
+              pathname === href ||
+              (label === "Billing" && pathname.startsWith("/payments/"))
+                ? "active"
+                : ""
+            }
           >
             <Icon size={18} />
             {label}
@@ -172,7 +189,10 @@ function AuthenticatedShell({ children }) {
               <span>Workspace</span>
               <ChevronRight size={13} />
               <strong>
-                {navigation.find((n) => n[0] === pathname)?.[1] || "Overview"}
+                {pathname.startsWith("/payments/")
+                  ? "Billing"
+                  : navigation.find((n) => n[0] === pathname)?.[1] ||
+                    "Overview"}
               </strong>
             </div>
             <form className="global-search" action="/dashboard/files">

@@ -1,33 +1,322 @@
 import { test, expect } from "@playwright/test";
-test("workspace animations follow request state and reduced motion", async ({ page }) => {
+
+function paymentFixture(overrides = {}) {
+  return {
+    mode: "test",
+    planCode: "basic",
+    paymentAccess: "active",
+    stripeStatus: "active",
+    cancelAtPeriodEnd: false,
+    pendingPlanCode: null,
+    pendingPlanAt: null,
+    billingPeriod: billing.billingPeriod,
+    synchronization: {
+      issue: "none",
+      lastSyncedAt: "2026-09-27T10:00:00Z",
+      pendingUsage: 0,
+    },
+    invoices: [],
+    ...overrides,
+  };
+}
+test("billing distinguishes disabled Stripe from an outage", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.goto("/dashboard/billing");
+  await expect(page.getByText("Stripe isn’t connected yet.")).toBeVisible();
+  await page.getByRole("button", { name: "Upgrade to Premium" }).click();
+  const assignment = page.waitForRequest(
+    (r) => r.method() === "PATCH" && r.url().endsWith("/subscriptions/current"),
+  );
+  await page.getByRole("button", { name: "Confirm plan change" }).click();
+  expect((await assignment).postDataJSON()).toEqual({ planCode: "premium" });
+  await page.route(`${api}/payments/current`, (r) =>
+    r.fulfill({
+      status: 503,
+      json: { message: "Provider temporarily unavailable" },
+    }),
+  );
+  await page.reload();
+  await expect(
+    page.getByText(/Billing is temporarily unavailable/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Upgrade to Premium" }),
+  ).toBeDisabled();
+});
+test("paid setup uses Stripe checkout with only the documented plan payload", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route(`${api}/payments/current`, (r) =>
+    r.fulfill({
+      json: paymentFixture({ stripeStatus: null, paymentAccess: "unmanaged" }),
+    }),
+  );
+  await page.route(`${api}/payments/checkout`, (r) =>
+    r.fulfill({
+      json: {
+        url: "https://checkout.stripe.com/c/pay/test_fixture",
+        mode: "setup",
+        paymentCollected: false,
+      },
+    }),
+  );
+  await page.route("https://checkout.stripe.com/**", (r) =>
+    r.fulfill({
+      contentType: "text/html",
+      body: "<h1>Hosted checkout fixture</h1>",
+    }),
+  );
+  await page.goto("/dashboard/billing");
+  await page.getByRole("button", { name: "Upgrade to Premium" }).click();
+  const checkout = page.waitForRequest(
+    (r) => r.method() === "POST" && r.url().endsWith("/payments/checkout"),
+  );
+  await page.getByRole("button", { name: "Continue to Stripe" }).click();
+  expect((await checkout).postDataJSON()).toEqual({ planCode: "premium" });
+  await expect(page).toHaveURL(
+    "https://checkout.stripe.com/c/pay/test_fixture",
+  );
+});
+test("Stripe cancellation is scheduled and the current plan can be kept", async ({
+  page,
+}) => {
+  await fixture(page);
+  let state = paymentFixture();
+  await page.route(`${api}/payments/current`, (r) =>
+    r.fulfill({ json: state }),
+  );
+  await page.route(`${api}/payments/cancel`, (r) => {
+    expect(r.request().postDataJSON()).toEqual({});
+    state = paymentFixture({
+      pendingPlanCode: "free",
+      pendingPlanAt: billing.billingPeriod.endsAt,
+      cancelAtPeriodEnd: true,
+    });
+    return r.fulfill({
+      json: {
+        planCode: "basic",
+        pendingPlanCode: "free",
+        effectiveAt: billing.billingPeriod.endsAt,
+        prorationBehavior: "none",
+      },
+    });
+  });
+  await page.route(`${api}/payments/plan`, (r) => {
+    expect(r.request().postDataJSON()).toEqual({ planCode: "basic" });
+    state = paymentFixture();
+    return r.fulfill({ json: { planCode: "basic", pendingPlanCode: null } });
+  });
+  await page.goto("/dashboard/billing");
+  await page.getByRole("button", { name: "Downgrade to Free" }).click();
+  await page.getByRole("button", { name: "Confirm plan change" }).click();
+  await expect(page.getByText(/Cancellation is scheduled/)).toBeVisible();
+  await page.getByRole("button", { name: "Keep Basic" }).click();
+  await page.getByRole("button", { name: "Confirm plan change" }).click();
+  await expect(page.getByText(/Cancellation is scheduled/)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Current plan" }),
+  ).toBeDisabled();
+});
+test("payment returns verify state, do not trust success queries, and reconcile only on click", async ({
+  page,
+}) => {
+  await fixture(page);
+  let state = paymentFixture({
+    stripeStatus: null,
+    paymentAccess: "unmanaged",
+  });
+  let reconciles = 0;
+  await page.route(`${api}/payments/current`, (r) =>
+    r.fulfill({ json: state }),
+  );
+  await page.route(`${api}/payments/reconcile`, (r) => {
+    reconciles++;
+    state = paymentFixture({
+      paymentAccess: "deferred",
+      stripeStatus: "trialing",
+    });
+    return r.fulfill({ json: state });
+  });
+  await page.goto("/payments/success?session_id=test-only&paid=true");
+  await expect(page).toHaveURL(/\/payments\/success$/);
+  await expect(page.getByText(/Setup is not confirmed yet/)).toBeVisible();
+  expect(reconciles).toBe(0);
+  await page.getByRole("button", { name: "Synchronize with Stripe" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your billing is connected." }),
+  ).toBeVisible();
+  expect(reconciles).toBe(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.screenshot({
+    path: "test-results/payment-return-mobile.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await page.goto("/payments/cancel");
+  await expect(
+    page.getByRole("heading", { name: "Checkout was closed." }),
+  ).toBeVisible();
+  await page.goto("/payments/return");
+  await expect(
+    page.getByRole("heading", { name: "Back to your workspace." }),
+  ).toBeVisible();
+});
+test("payment controls protect members and preserve a return route after login", async ({
+  page,
+}) => {
+  await page.goto("/payments/success");
+  await expect(page).toHaveURL(/\/login\?next=%2Fpayments%2Fsuccess/);
+  await fixture(page);
+  await page.route(`${api}/auth/sign-in`, (r) =>
+    r.fulfill({ json: { accessToken: "test-session" } }),
+  );
+  await page
+    .getByLabel("Work email", { exact: true })
+    .fill("alex@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("test-password");
+  await page.getByRole("button", { name: "Sign in to your workspace" }).click();
+  await expect(page).toHaveURL(/\/payments\/success$/);
+  await fixture(page, "member");
+  let paymentReads = 0;
+  await page.route(`${api}/payments/current`, (r) => {
+    paymentReads++;
+    return r.fulfill({ status: 403, json: {} });
+  });
+  await page.goto("/payments/return");
+  await expect(
+    page.getByRole("heading", { name: "Administrator access required" }),
+  ).toBeVisible();
+  await page.goto("/dashboard/billing");
+  await expect(
+    page.getByText("Your administrator manages this plan.").first(),
+  ).toBeVisible();
+  expect(paymentReads).toBe(0);
+});
+test("invoice links are restricted to Stripe and the portal uses its documented endpoint", async ({
+  page,
+}) => {
+  await fixture(page);
+  const invoice = {
+    id: "in_fixture",
+    status: "paid",
+    currency: "usd",
+    amountDueCents: 500,
+    amountPaidCents: 500,
+    totalCents: 500,
+    createdAt: "2026-09-27T00:00:00Z",
+    hostedInvoiceUrl: "https://invoice.stripe.com/i/test",
+  };
+  await page.route(`${api}/payments/current`, (r) =>
+    r.fulfill({
+      json: paymentFixture({
+        invoices: [
+          invoice,
+          { ...invoice, id: "in_bad", hostedInvoiceUrl: "javascript:alert(1)" },
+        ],
+      }),
+    }),
+  );
+  await page.route(`${api}/payments/portal`, (r) => {
+    expect(r.request().postDataJSON()).toEqual({});
+    return r.fulfill({
+      json: { url: "https://billing.stripe.com/p/session/test_fixture" },
+    });
+  });
+  await page.route("https://billing.stripe.com/**", (r) =>
+    r.fulfill({ contentType: "text/html", body: "<h1>Portal fixture</h1>" }),
+  );
+  await page.goto("/dashboard/billing");
+  await expect(page.getByRole("link", { name: "View invoice" })).toHaveCount(1);
+  await expect(
+    page.getByRole("link", { name: "View invoice" }),
+  ).toHaveAttribute("href", invoice.hostedInvoiceUrl);
+  await page.screenshot({
+    path: "test-results/billing-stripe-desktop.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await page
+    .getByRole("button", { name: "Payment methods & invoices" })
+    .click();
+  await expect(page).toHaveURL(
+    "https://billing.stripe.com/p/session/test_fixture",
+  );
+});
+test("workspace animations follow request state and reduced motion", async ({
+  page,
+}) => {
   await fixture(page);
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.route(`${api}/ai/conversations?**`, (route) => route.fulfill({ json: { conversations: [], total: 0, page: 1, limit: 20 } }));
+  await page.route(`${api}/ai/conversations?**`, (route) =>
+    route.fulfill({
+      json: { conversations: [], total: 0, page: 1, limit: 20 },
+    }),
+  );
   let finishReply;
-  const reply = new Promise((resolve) => { finishReply = resolve; });
+  const reply = new Promise((resolve) => {
+    finishReply = resolve;
+  });
   await page.route(`${api}/ai/chat`, async (route) => {
     await reply;
     await route.fulfill({ status: 503, json: { code: "ai_disabled" } });
   });
   await page.goto("/dashboard");
   await expect(page.locator(".overview-orbit")).toBeVisible();
-  await expect(page.locator(".overview-orbit g")).toHaveCSS("animation-name", "overview-drift");
-  await expect(page.locator(".usage-hero .progress > span")).toHaveCSS("animation-iteration-count", "1");
+  await expect(page.locator(".overview-orbit g")).toHaveCSS(
+    "animation-name",
+    "overview-drift",
+  );
+  await expect(page.locator(".usage-hero .progress > span")).toHaveCSS(
+    "animation-iteration-count",
+    "1",
+  );
   await page.getByRole("button", { name: "Open AI chat", exact: true }).hover();
-  await expect(page.locator(".robot-arm")).toHaveCSS("animation-name", "robot-wave");
+  await expect(page.locator(".robot-arm")).toHaveCSS(
+    "animation-name",
+    "robot-wave",
+  );
   await page.getByRole("button", { name: "Open AI chat", exact: true }).click();
   await page.getByLabel("Message the assistant").fill("Check my usage");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   try {
-    await expect(page.locator(".chat-transcript")).toHaveAttribute("aria-busy", "true");
-    await expect(page.locator(".robot-antenna")).toHaveCSS("animation-name", "robot-thinking");
-  } finally { finishReply(); }
-  await expect(page.locator(".chat-transcript")).toHaveAttribute("aria-busy", "false");
-  await expect(page.locator(".robot-antenna")).toHaveCSS("animation-name", "none");
+    await expect(page.locator(".chat-transcript")).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    await expect(page.locator(".robot-antenna")).toHaveCSS(
+      "animation-name",
+      "robot-thinking",
+    );
+  } finally {
+    finishReply();
+  }
+  await expect(page.locator(".chat-transcript")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await expect(page.locator(".robot-antenna")).toHaveCSS(
+    "animation-name",
+    "none",
+  );
   await page.getByRole("button", { name: "Close chat", exact: true }).click();
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(page.locator(".overview-orbit g")).toHaveCSS("animation-iteration-count", "1");
-  await page.screenshot({ path: "test-results/overview-motion.png", fullPage: true, animations: "disabled" });
+  await expect(page.locator(".overview-orbit g")).toHaveCSS(
+    "animation-iteration-count",
+    "1",
+  );
+  await page.screenshot({
+    path: "test-results/overview-motion.png",
+    fullPage: true,
+    animations: "disabled",
+  });
 });
 const api = "http://localhost:3000/backend";
 const owner = {
@@ -134,6 +423,13 @@ async function fixture(page, role = "owner") {
       /^\/backend/,
       "",
     );
+    if (path === "/payments/current") {
+      await route.fulfill({
+        status: 503,
+        json: { message: "Test Mode payments are not configured" },
+      });
+      return;
+    }
     const bodies = {
       "/auth/current-user": role === "owner" ? owner : member,
       "/companies/current": {
@@ -228,13 +524,17 @@ test("unauthenticated routes redirect and registration renders without overflow"
 }) => {
   await page.goto("/dashboard/files");
   await expect(page).toHaveURL(/\/login/);
-  await expect(page.getByRole("button", { name: "Sign in to your workspace" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign in to your workspace" }),
+  ).toBeVisible();
   const loginHeadline = await page.locator(".story-body h1").boundingBox();
   await page.goto("/register");
   await expect(
     page.getByRole("heading", { name: "A home for your data." }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create your workspace", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Create your workspace", exact: true }),
+  ).toBeVisible();
   const signupHeadline = await page.locator(".story-body h1").boundingBox();
   expect(Math.abs(signupHeadline.y - loginHeadline.y)).toBeLessThanOrEqual(1);
   await page.setViewportSize({ width: 390, height: 844 });

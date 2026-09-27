@@ -1,4 +1,4 @@
-# Backend/frontend feature audit — 2026-09-26
+# Backend/frontend feature audit — 2026-09-27
 
 Compared the deployed OpenAPI schema and local backend controllers/services with the tenant frontend.
 
@@ -15,14 +15,20 @@ The handoff says `OPENROUTER_ENABLED=false`. The frontend cannot change Render c
 | Capability | Backend routes | Frontend status / reason |
 | --- | --- | --- |
 | Google OAuth | GET /auth/google, GET /auth/google/callback, POST /auth/google/exchange | Not integrated; Google OAuth is unconfigured according to the handoff. Needs browser-bound start, callback/code exchange, and error handling. |
-| Stripe Checkout and customer portal | POST /payments/checkout, POST /payments/portal | Not integrated; explicitly excluded from the original brief and Stripe disabled in the handoff. |
-| Stripe subscription/invoice status and reconciliation | GET /payments/current, POST /payments/plan, POST /payments/cancel, POST /payments/reconcile | Not integrated; existing Billing is the internal estimate and assignment-mode plan change, not Stripe payment state. |
 | Owner viewing/editing another employee’s profile | GET/PATCH /users/:id | Own profile is supported; employee-management page lists, invites, and deletes employees but does not offer employee detail/name-edit controls. |
 | Upload/download/delete stored files | POST /files, GET /files/:id/download, DELETE /files/:id | Implemented but intentionally gated by NEXT_PUBLIC_STORAGE_ENABLED=false until S3 is configured. Metadata and permission editing are enabled. |
 | Operational health display | GET /health/live, GET /health/ready | No dedicated service-status screen; these are operational endpoints, not required tenant product features. |
 | Separate Platform Admin console | POST /admin/auth/login; GET /admin/dashboard, /admin/companies, /admin/companies/:id, /admin/users, /admin/files, /admin/audit-logs; POST /admin/companies/:id/suspend and /reactivate | Intentionally excluded from the tenant frontend and gateway. Requires separate Platform Admin credentials and product scope. Platform audit logs are not a tenant activity feed. |
 
 Stripe's signed `/payments/webhook` is server-to-server functionality; it should not have a frontend control.
+
+## Stripe frontend added
+
+Owner billing now integrates all six tenant payment endpoints: current state, hosted Checkout setup, restricted Customer Portal, plan changes, cancellation, and explicit reconciliation. `/payments/success`, `/payments/cancel`, and `/payments/return` check server state; `/settings/billing` aliases the portal return page. Login preserves only these allowlisted return destinations. The gateway deliberately does not expose the webhook.
+
+The deployed Swagger schema and local payment service describe **test mode only**. Checkout is `mode: setup`, returns `paymentCollected: false`, and saves a payment method rather than charging immediately. Pending plan changes, period-end cancellation, payment access, sync problems, and the latest ten invoices are shown separately from internal estimates. External links are restricted to the documented Stripe-hosted destinations. The frontend cannot enable Stripe or set Render return URLs. Live hosted checkout still requires the backend configuration and an activated test owner account.
+
+Only the backend's exact disabled-service response enables the existing unpaid plan-assignment flow. Generic 503s do not fall back to assignment. Employee views never request owner payment endpoints. Reconciliation is user-triggered, not automatically retried or invoked merely by loading a return URL.
 
 ## Requested ideas that do not have backend endpoints
 

@@ -41,7 +41,8 @@ Read against `../FRONTEND_HANDOFF.md` and the deployed `/docs/openapi.json` on 2
 | Employees | GET /users; DELETE /users/:id | Owner only |
 | Invitations | GET/POST /invitations; POST /invitations/:id/resend; DELETE /invitations/:id | Owner only; handle ambiguous email failure without automatic mutation retries |
 | Plans | GET /plans; GET/PATCH /subscriptions/current | Both roles can read; only owner changes planCode |
-| Billing | GET /subscriptions/current/billing | Internal estimate, activation-anchored period; no payments or invoices |
+| Billing estimate | GET /subscriptions/current/billing | Internal estimate, activation-anchored period; distinct from Stripe invoices |
+| Stripe test billing | GET /payments/current; POST /payments/checkout, /payments/portal, /payments/plan, /payments/cancel, /payments/reconcile | Owner-only payment setup, invoices, plan changes, and explicit synchronization |
 
 ## Backend limitations intentionally reflected in the UI
 
@@ -75,4 +76,24 @@ No real account has been created or existing tenant data modified during develop
 The persistent lower-right chat widget integrates POST `/ai/chat`, GET `/ai/conversations?page=1&limit=20`, GET `/ai/conversations/:id`, and DELETE `/ai/conversations/:id`. Both roles have access to their own conversations. Model/provider configuration is server-controlled. If the backend returns `ai_disabled`, the page disables sending and explains that the service needs enabling; saved history remains readable. No API key is needed or accepted by this frontend. See `BACKEND_FEATURE_AUDIT.md` for the full feature comparison and deployment prerequisites.
 
 The chatbot opens over the current page, preserves its draft when minimized or during client navigation, and has an inline History view. The login screen shows a sign-in prompt. The former /dashboard/assistant route redirects to the dashboard with chat open. The visual refresh uses softer surfaces, rounded controls, lighter borders, and responsive spacing. Production build and nine browser tests passed after this update.
+
+## Stripe return routes and backend setup
+
+Verified against deployed Swagger and the backend payment service on 2026-09-27. The current backend supports **Stripe test mode only**. No frontend Stripe secret, publishable key, or Stripe SDK is needed; the server creates hosted sessions.
+
+Configure these on **Render**, using the exact origin where this frontend runs:
+
+```env
+STRIPE_CHECKOUT_SUCCESS_URL=https://<frontend-host>/payments/success
+STRIPE_CHECKOUT_CANCEL_URL=https://<frontend-host>/payments/cancel
+STRIPE_PORTAL_RETURN_URL=https://<frontend-host>/payments/return
+```
+
+For local development, these pages exist at `http://localhost:3000/payments/success`, `/payments/cancel`, and `/payments/return`. Backend validation permits HTTP localhost callbacks only outside production; with `NODE_ENV=production`, **all three callback URLs must use HTTPS**, including localhost. A deployed HTTPS frontend or an explicitly configured HTTPS development origin is needed for that environment. `/settings/billing` is a compatibility alias for the backend's previous example portal return URL. No `session_id` query parameter is required: state is fetched using the authenticated company. Query parameters never prove payment, select a plan, or supply a redirect destination, and are removed on the return pages. The existing sessionStorage bearer survives same-tab Stripe navigation; expired sessions are sent through sign-in with a tightly allowlisted return path.
+
+The server must enable `STRIPE_ENABLED` and configure its test secret, catalog, webhook, and restricted portal before hosted flows work. The frontend discovers availability through owner-only `GET /payments/current`. A generic outage blocks plan mutations; only the explicit disabled response allows the existing unpaid workspace-plan assignment. Stripe-managed accounts may still reject assignment on the backend.
+
+Checkout saves a test payment method and does not collect payment immediately. Existing paid subscriptions use `/payments/plan`; Free uses `/payments/cancel`. Pending changes and period-end cancellation are displayed from server state, including a Keep-current-plan action. Return pages perform only reads until the owner explicitly chooses Synchronize with Stripe. No mutation is automatically retried.
+
+Billing tests use isolated provider responses for disabled/outage states, checkout payload and redirect, scheduled cancellation and keeping a plan, pending/success returns, reconciliation, session return routing, employee restrictions, invoice URL validation, and portal redirects. These checks do not substitute for an end-to-end Stripe test transaction with configured backend credentials.
 
