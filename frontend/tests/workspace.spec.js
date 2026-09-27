@@ -1,4 +1,34 @@
 import { test, expect } from "@playwright/test";
+test("workspace animations follow request state and reduced motion", async ({ page }) => {
+  await fixture(page);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.route(`${api}/ai/conversations?**`, (route) => route.fulfill({ json: { conversations: [], total: 0, page: 1, limit: 20 } }));
+  let finishReply;
+  const reply = new Promise((resolve) => { finishReply = resolve; });
+  await page.route(`${api}/ai/chat`, async (route) => {
+    await reply;
+    await route.fulfill({ status: 503, json: { code: "ai_disabled" } });
+  });
+  await page.goto("/dashboard");
+  await expect(page.locator(".overview-orbit")).toBeVisible();
+  await expect(page.locator(".overview-orbit g")).toHaveCSS("animation-name", "overview-drift");
+  await expect(page.locator(".usage-hero .progress > span")).toHaveCSS("animation-iteration-count", "1");
+  await page.getByRole("button", { name: "Open AI chat", exact: true }).hover();
+  await expect(page.locator(".robot-arm")).toHaveCSS("animation-name", "robot-wave");
+  await page.getByRole("button", { name: "Open AI chat", exact: true }).click();
+  await page.getByLabel("Message the assistant").fill("Check my usage");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  try {
+    await expect(page.locator(".chat-transcript")).toHaveAttribute("aria-busy", "true");
+    await expect(page.locator(".robot-antenna")).toHaveCSS("animation-name", "robot-thinking");
+  } finally { finishReply(); }
+  await expect(page.locator(".chat-transcript")).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator(".robot-antenna")).toHaveCSS("animation-name", "none");
+  await page.getByRole("button", { name: "Close chat", exact: true }).click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(page.locator(".overview-orbit g")).toHaveCSS("animation-iteration-count", "1");
+  await page.screenshot({ path: "test-results/overview-motion.png", fullPage: true, animations: "disabled" });
+});
 const api = "http://localhost:3000/backend";
 const owner = {
   _id: "aaaaaaaaaaaaaaaaaaaaaaaa",

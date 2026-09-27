@@ -22,6 +22,7 @@ import { request } from "@/lib/api";
 import { useResource } from "@/lib/hooks";
 import { initials } from "@/lib/utils";
 import { Button, ErrorState, Loading, Logo, Progress } from "@/components/ui";
+import DataAtmosphere from "./data-atmosphere";
 const WorkspaceContext = createContext(null);
 export const useWorkspace = () => useContext(WorkspaceContext);
 const navigation = [
@@ -158,6 +159,7 @@ function AuthenticatedShell({ children }) {
           <MobileNav onClose={() => setOpen(false)}>{sidebar}</MobileNav>
         )}
         <div className="app-content">
+          <DataAtmosphere />
           <header className="topbar">
             <div className="breadcrumb">
               <button

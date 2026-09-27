@@ -29,6 +29,10 @@ h3 {
   box-shadow: none;
   border-color: #bac8bf;
 }
+.button:hover:not(:disabled),
+.chat-launcher:hover {
+  transform: none;
+}
 input,
 select,
 .auth-form-wrap input {
@@ -1289,9 +1293,29 @@ select:focus-visible {
 }
 .search-field,
 .global-search {
+  padding: 0 17px;
+  min-height: 46px;
+  gap: 11px;
   border: 1px solid #d5dfd4;
   border-radius: 14px;
-  background: #ffffff80;
+  background: #ffffffb3;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+.global-search {
+  width: clamp(240px, 25vw, 350px);
+}
+.search-field input,
+.global-search input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 11px 0;
+  font-size: 12px;
+}
+.global-search kbd {
+  flex-shrink: 0;
+  margin-left: 3px;
 }
 .search-field:focus-within,
 .global-search:focus-within {
@@ -1483,7 +1507,104 @@ select:focus-visible {
     transform: rotate(2deg);
   }
 }
+.app-content {
+  position: relative;
+  isolation: isolate;
+}
+.data-atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+  color: var(--teal);
+}
+.data-atmosphere svg {
+  position: absolute;
+  opacity: 0.2;
+}
+.data-atmosphere text {
+  fill: currentColor;
+  font-family: "Consolas", monospace;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+}
+.data-constellation {
+  width: 245px;
+  height: 96px;
+  top: 86px;
+  right: 48px;
+}
+.data-margin {
+  width: 25px;
+}
+.data-margin-right {
+  height: 300px;
+  top: 360px;
+  right: 5px;
+}
+.data-margin-left {
+  height: 230px;
+  top: 560px;
+  left: 4px;
+}
+.data-lattice {
+  width: 125px;
+  height: 50px;
+  right: 150px;
+  bottom: 22px;
+}
+.data-float {
+  animation: data-float 18s ease-in-out infinite alternate;
+}
+.data-float-late {
+  animation-delay: -9s;
+  animation-duration: 25s;
+}
+@keyframes data-float {
+  from {
+    transform: translateY(-4px);
+  }
+  to {
+    transform: translateY(7px);
+  }
+}
+@media (max-width: 1100px) {
+  .data-constellation {
+    width: 160px;
+    right: 28px;
+    opacity: 0.13;
+  }
+  .data-margin {
+    width: 16px;
+    opacity: 0.14;
+  }
+  .data-margin-left {
+    left: 1px;
+  }
+  .data-margin-right {
+    right: 0;
+  }
+  .data-lattice {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .data-constellation,
+  .data-margin-left {
+    display: none;
+  }
+  .data-margin-right {
+    top: 350px;
+    width: 13px;
+    opacity: 0.12;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
+  .data-float {
+    animation: none;
+  }
   .overview-orbit g {
     transform: none;
   }
