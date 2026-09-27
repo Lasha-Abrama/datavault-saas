@@ -14,8 +14,13 @@ import {
   AiModelCompletion,
   AiProviderFailure,
   AiProviderFailureReason,
+  AiProviderRequestDiagnostic,
 } from './ai-model-client';
 import { normalizeChatCompletion } from './chat-completion-response';
+
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 
 /** Google's supported OpenAI-compatible endpoint is a direct Gemini API call. */
 @Injectable()
@@ -24,6 +29,10 @@ export class GeminiClientService implements AiModelClient {
   private readonly client?: OpenAI;
   private readonly model?: string;
   private readonly maxOutputTokens: number;
+  private readonly toolMessageRoles = new WeakMap<
+    object,
+    'assistant' | 'model'
+  >();
 
   constructor(config: ConfigService) {
     this.enabled = config.get<boolean>('GEMINI_ENABLED') === true;
@@ -48,11 +57,13 @@ export class GeminiClientService implements AiModelClient {
   ): Promise<AiModelCompletion> {
     if (!this.client || !this.model)
       throw new AiProviderFailure(AiProviderFailureReason.UNAVAILABLE);
+    let sentMessages: ChatCompletionMessageParam[] | undefined;
     try {
+      sentMessages = this.withToolNames(messages);
       const response = await this.client.chat.completions.create(
         {
           model: this.model,
-          messages: this.withToolNames(messages),
+          messages: sentMessages,
           tools,
           tool_choice: 'auto',
           reasoning_effort: 'low',
@@ -61,7 +72,15 @@ export class GeminiClientService implements AiModelClient {
         },
         { signal },
       );
-      return normalizeChatCompletion(response, 'gemini');
+      const completion = normalizeChatCompletion(response, 'gemini');
+      if (completion.message.tool_calls?.length) {
+        const originalRole: unknown = response.choices[0].message.role;
+        this.toolMessageRoles.set(
+          completion.message,
+          originalRole === 'model' ? 'model' : 'assistant',
+        );
+      }
+      return completion;
     } catch (error) {
       if (error instanceof AiProviderFailure) throw error;
       if (
@@ -84,6 +103,13 @@ export class GeminiClientService implements AiModelClient {
             AiProviderFailureReason.RATE_LIMIT,
             status,
           );
+        if (status === 400)
+          throw new AiProviderFailure(
+            AiProviderFailureReason.UNAVAILABLE,
+            status,
+            undefined,
+            this.badRequestDiagnostic(error, sentMessages ?? messages),
+          );
         throw new AiProviderFailure(
           AiProviderFailureReason.UNAVAILABLE,
           status,
@@ -102,27 +128,112 @@ export class GeminiClientService implements AiModelClient {
       if (message.role === 'assistant') {
         for (const call of message.tool_calls ?? [])
           if (call.type === 'function') names.set(call.id, call.function.name);
-        if (message.tool_calls?.length)
-          // Gemini's compatibility API documents `model` for function-call
-          // history. Preserve its opaque extra_content thought signature.
-          // Its examples omit content for tool-only messages. Keep that
-          // wire shape when the normalized internal message uses null.
-          return message.content === null
-            ? ({
-                ...message,
-                role: 'model',
-                content: undefined,
-              } as unknown as ChatCompletionMessageParam)
-            : ({
-                ...message,
-                role: 'model',
-              } as unknown as ChatCompletionMessageParam);
+        if (message.tool_calls?.length) {
+          // A response object is not a request DTO. Google's compatibility
+          // examples use both assistant and model for tool-call history; keep
+          // the original role, IDs, order and opaque signature metadata.
+          const toolCalls = message.tool_calls.map((call) => {
+            if (call.type !== 'function')
+              throw new AiProviderFailure(
+                AiProviderFailureReason.INVALID_RESPONSE,
+              );
+            const extra: unknown = (
+              call as unknown as { extra_content?: unknown }
+            ).extra_content;
+            if (extra !== undefined && !record(extra))
+              throw new AiProviderFailure(
+                AiProviderFailureReason.INVALID_RESPONSE,
+              );
+            return {
+              id: call.id,
+              type: call.type,
+              function: {
+                name: call.function.name,
+                arguments: call.function.arguments,
+              },
+              ...(extra === undefined ? {} : { extra_content: extra }),
+            };
+          });
+          return {
+            role: this.toolMessageRoles.get(message) ?? 'assistant',
+            ...(typeof message.content === 'string' && message.content
+              ? { content: message.content }
+              : {}),
+            tool_calls: toolCalls,
+          } as unknown as ChatCompletionMessageParam;
+        }
       }
       if (message.role !== 'tool') return message;
       const name = names.get(message.tool_call_id);
-      if (!name)
+      if (!name || typeof message.content !== 'string')
         throw new AiProviderFailure(AiProviderFailureReason.INVALID_RESPONSE);
-      return { ...message, name } as ChatCompletionMessageParam;
+      return {
+        role: 'tool',
+        name,
+        tool_call_id: message.tool_call_id,
+        content: message.content,
+      } as ChatCompletionMessageParam;
     });
+  }
+
+  private badRequestDiagnostic(
+    error: unknown,
+    messages: ChatCompletionMessageParam[],
+  ): AiProviderRequestDiagnostic {
+    // Inspect provider text only to select a fixed category. Never retain it.
+    const detail = error instanceof Error ? error.message : '';
+    const category: AiProviderRequestDiagnostic['category'] =
+      /missing (?:a )?thought_signature/i.test(detail)
+        ? 'missing_thought_signature'
+        : /unknown name|unknown field/i.test(detail)
+          ? 'unsupported_message_field'
+          : /functionresponse|tool_call_id|function response/i.test(detail)
+            ? 'invalid_tool_response'
+            : /invalid.argument/i.test(detail)
+              ? 'invalid_argument'
+              : 'other_bad_request';
+    const body: unknown = error instanceof APIError ? error.error : undefined;
+    const rawCode = record(body) ? body.status : undefined;
+    const providerCode: AiProviderRequestDiagnostic['providerCode'] =
+      rawCode === 'INVALID_ARGUMENT' || rawCode === 'FAILED_PRECONDITION'
+        ? rawCode
+        : 'other';
+    const toolCallSteps: unknown[][] = [];
+    let toolResultCount = 0;
+    for (const message of messages) {
+      if (message.role === 'tool') toolResultCount++;
+      const runtime: unknown = message;
+      if (
+        record(runtime) &&
+        Array.isArray(runtime.tool_calls) &&
+        runtime.tool_calls.length
+      )
+        toolCallSteps.push(runtime.tool_calls as unknown[]);
+    }
+    const allToolCallStepsSigned = toolCallSteps.length
+      ? toolCallSteps.every((calls) => {
+          const first = calls[0];
+          if (!record(first) || !record(first.extra_content)) return false;
+          const google = first.extra_content.google;
+          return (
+            record(google) &&
+            typeof google.thought_signature === 'string' &&
+            google.thought_signature.length > 0
+          );
+        })
+      : undefined;
+    return {
+      phase: toolResultCount ? 'tool_continuation' : 'initial',
+      category,
+      providerCode,
+      toolCallCount: Math.min(
+        toolCallSteps.reduce((sum, calls) => sum + calls.length, 0),
+        100,
+      ),
+      toolResultCount: Math.min(toolResultCount, 100),
+      ...(allToolCallStepsSigned === undefined
+        ? {}
+        : { allToolCallStepsSigned }),
+    };
   }
 }

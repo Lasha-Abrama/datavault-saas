@@ -214,6 +214,9 @@ export class AiService {
           reason: error.reason,
           status: error.status,
           ...(error.diagnostic ? { validation: error.diagnostic } : {}),
+          ...(error.requestDiagnostic
+            ? { providerRequest: error.requestDiagnostic }
+            : {}),
         });
         throw this.providerException(error.reason);
       }

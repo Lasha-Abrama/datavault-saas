@@ -136,13 +136,13 @@ describe('GeminiClientService', () => {
       ]),
     );
     expect(request.messages[1]).toMatchObject({
-      ...assistant,
-      role: 'model',
-      content: undefined,
+      role: 'assistant',
+      tool_calls: assistant.tool_calls,
     });
-    expect(JSON.parse(JSON.stringify(request.messages[1]))).not.toHaveProperty(
-      'content',
-    );
+    expect(Object.keys(request.messages[1] as object)).toEqual([
+      'role',
+      'tool_calls',
+    ]);
   });
 
   it('accepts documented Gemini tool calls without a content property and preserves parallel signatures', async () => {
@@ -240,6 +240,81 @@ describe('GeminiClientService', () => {
     await expect(
       service.complete([], tools, AbortSignal.timeout(1000)),
     ).resolves.toMatchObject({ message: { content: '' } });
+  });
+
+  it('classifies a rejected signed tool continuation without logging provider text', async () => {
+    const { service, create } = fixture();
+    const call = {
+      id: 'call-1',
+      type: 'function' as const,
+      function: { name: 'get_company_statistics', arguments: '{}' },
+      extra_content: { google: { thought_signature: 'opaque-fixture' } },
+    };
+    create.mockResolvedValueOnce({
+      model: 'gemini-3.5-flash-lite',
+      choices: [
+        { message: { role: 'assistant', content: null, tool_calls: [call] } },
+      ],
+    });
+    const first = await service.complete(
+      [{ role: 'user', content: 'fixture question' }],
+      tools,
+      AbortSignal.timeout(1000),
+    );
+    create.mockRejectedValueOnce(
+      APIError.generate(
+        400,
+        {
+          error: {
+            status: 'INVALID_ARGUMENT',
+            message:
+              'Function call fixture-private-data is missing a thought_signature',
+          },
+        },
+        'fixture-private-data',
+        new Headers(),
+      ),
+    );
+    const continuation: ChatCompletionMessageParam[] = [
+      { role: 'user', content: 'fixture question' },
+      first.message,
+      { role: 'tool', tool_call_id: 'call-1', content: '{"remaining":12}' },
+    ];
+    let failure: unknown;
+    try {
+      await service.complete(continuation, tools, AbortSignal.timeout(1000));
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      reason: AiProviderFailureReason.UNAVAILABLE,
+      status: 400,
+      requestDiagnostic: {
+        phase: 'tool_continuation',
+        category: 'missing_thought_signature',
+        providerCode: 'INVALID_ARGUMENT',
+        toolCallCount: 1,
+        toolResultCount: 1,
+        allToolCallStepsSigned: true,
+      },
+    });
+    expect(JSON.stringify(failure)).not.toContain('fixture-private-data');
+    expect(JSON.stringify(failure)).not.toContain('opaque-fixture');
+    expect(JSON.stringify(failure)).not.toContain('remaining');
+  });
+
+  it('rejects a tool result without a matching prior call before contacting Gemini', async () => {
+    const { service, create } = fixture();
+    await expect(
+      service.complete(
+        [{ role: 'tool', tool_call_id: 'missing', content: '{}' }],
+        tools,
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toMatchObject({
+      reason: AiProviderFailureReason.INVALID_RESPONSE,
+    });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it.each([

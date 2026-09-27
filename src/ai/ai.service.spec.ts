@@ -512,6 +512,122 @@ describe('AiService', () => {
     expect(f.usages).toHaveLength(2);
   });
 
+  it('runs the complete Gemini tool continuation with only documented wire fields', async () => {
+    const f = fixture({ GEMINI_ENABLED: true, GEMINI_TIMEOUT_MS: 5000 });
+    const gemini = new GeminiClientService({
+      get: (key: string) =>
+        (({ GEMINI_ENABLED: true }) as Record<string, unknown>)[key],
+      getOrThrow: (key: string) =>
+        (
+          ({
+            GEMINI_API_KEY: 'fixture-key-not-for-network',
+            GEMINI_MODEL: 'gemini-3.5-flash-lite',
+            GEMINI_TIMEOUT_MS: 5000,
+            GEMINI_MAX_OUTPUT_TOKENS: 1024,
+          }) as Record<string, unknown>
+        )[key],
+    } as ConfigService);
+    const signature = 'opaque-signature-fixture';
+    const create = jest
+      .fn()
+      .mockResolvedValueOnce({
+        model: 'gemini-3.5-flash-lite',
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              refusal: null,
+              reasoning_content: 'internal-provider-only-fixture',
+              tool_calls: [
+                {
+                  id: 'gemini-call-1',
+                  type: 'function',
+                  function: { name: 'get_company_statistics', arguments: '{}' },
+                  extra_content: { google: { thought_signature: signature } },
+                },
+              ],
+            },
+          },
+        ],
+        usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 },
+      })
+      .mockResolvedValueOnce({
+        model: 'gemini-3.5-flash-lite',
+        choices: [
+          { message: { role: 'assistant', content: '12 uploads remain.' } },
+        ],
+        usage: { prompt_tokens: 18, completion_tokens: 6, total_tokens: 24 },
+      });
+    (gemini as unknown as { client: unknown }).client = {
+      chat: { completions: { create } },
+    };
+    const primary = {
+      enabled: true,
+      complete: jest
+        .fn()
+        .mockRejectedValue(
+          new AiProviderFailure(AiProviderFailureReason.RATE_LIMIT, 429),
+        ),
+    };
+    const router = new AiProviderRouterService(
+      primary as unknown as OpenRouterClientService,
+      gemini,
+    );
+    f.complete.mockImplementation((messages, tools, signal, context) =>
+      router.complete(messages, tools, signal, context),
+    );
+
+    const result = await f.service.chat(f.actor, {
+      message: 'How many uploads remain?',
+    });
+    expect(result.usage).toMatchObject({
+      model: 'gemini-3.5-flash-lite',
+      promptTokens: 30,
+      completionTokens: 14,
+      totalTokens: 44,
+      toolCallCount: 1,
+    });
+    expect(primary.complete).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(f.tools.execute).toHaveBeenCalledWith(
+      f.actor,
+      'get_company_statistics',
+      '{}',
+    );
+    const recorded: unknown = create.mock.calls;
+    const continuation = (recorded as Array<Array<{ messages: unknown }>>)[1][0]
+      .messages as Array<Record<string, unknown>>;
+    expect(continuation.map((message) => message.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'tool',
+    ]);
+    expect(continuation[2]).toEqual({
+      role: 'assistant',
+      tool_calls: [
+        {
+          id: 'gemini-call-1',
+          type: 'function',
+          function: { name: 'get_company_statistics', arguments: '{}' },
+          extra_content: { google: { thought_signature: signature } },
+        },
+      ],
+    });
+    expect(continuation[3]).toEqual({
+      role: 'tool',
+      name: 'get_company_statistics',
+      tool_call_id: 'gemini-call-1',
+      content: '{"safe":"authoritative"}',
+    });
+    expect(JSON.stringify(continuation)).not.toContain(
+      'internal-provider-only-fixture',
+    );
+    expect(f.messages).toHaveLength(2);
+    expect(f.usages).toHaveLength(1);
+  });
+
   it('rejects repeated, invalid, or excessive tool calls without persisting prompts', async () => {
     const toolAnswer = {
       ...answer(),

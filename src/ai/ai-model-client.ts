@@ -64,11 +64,27 @@ export interface AiResponseDiagnostic {
   toolCallCount?: number;
 }
 
+/** Allowlisted diagnostics for rejected provider requests; never store raw errors. */
+export interface AiProviderRequestDiagnostic {
+  phase: 'initial' | 'tool_continuation';
+  category:
+    | 'invalid_argument'
+    | 'missing_thought_signature'
+    | 'unsupported_message_field'
+    | 'invalid_tool_response'
+    | 'other_bad_request';
+  providerCode: 'INVALID_ARGUMENT' | 'FAILED_PRECONDITION' | 'other';
+  toolCallCount: number;
+  toolResultCount: number;
+  allToolCallStepsSigned?: boolean;
+}
+
 export class AiProviderFailure extends Error {
   constructor(
     public readonly reason: AiProviderFailureReason,
     public readonly status?: number,
     public readonly diagnostic?: AiResponseDiagnostic,
+    public readonly requestDiagnostic?: AiProviderRequestDiagnostic,
   ) {
     super(reason);
   }
