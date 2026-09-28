@@ -1,5 +1,18 @@
 // Same-origin gateway forwards to NEXT_PUBLIC_API_URL without a backend /api prefix.
 export const API_URL = "/backend";
+export function googleSignInUrl() {
+  try {
+    const base = new URL(process.env.NEXT_PUBLIC_API_URL);
+    if (
+      base.protocol !== "https:" &&
+      !(base.protocol === "http:" && ["localhost", "127.0.0.1"].includes(base.hostname))
+    )
+      return null;
+    return new URL("/auth/google", base).toString();
+  } catch {
+    return null;
+  }
+}
 const KEY = "datavault.session";
 export const session = {
   get() {
@@ -88,6 +101,14 @@ export class ApiError extends Error {
           : status === 502 || status === 503 || status === 504
             ? "The assistant is temporarily unavailable. Your draft has been kept; check history before trying again."
             : this.message);
+    }
+    if (context === "/auth/google/exchange") {
+      if (status === 400 || status === 401)
+        this.message =
+          "This Google sign-in link is invalid or has expired. Please try Google sign-in again.";
+      else if (status === 503 || status === 502 || status === 504)
+        this.message =
+          "Google sign-in is temporarily unavailable. Please try again shortly.";
     }
     this.fields = {};
     if (status === 400 && Array.isArray(body?.message)) {

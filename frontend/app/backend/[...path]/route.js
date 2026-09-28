@@ -7,7 +7,7 @@ const routes = [
   ["GET", /^ai\/conversations\/[a-f\d]{24}$/i],
   ["DELETE", /^ai\/conversations\/[a-f\d]{24}$/i],
   ["GET", /^auth\/current-user$/],
-  ["POST", /^auth\/(sign-in|sign-up|verify-account|resend-verification)$/],
+  ["POST", /^auth\/(sign-in|sign-up|verify-account|resend-verification|google\/exchange)$/],
   [
     "GET",
     /^(plans|companies\/current|subscriptions\/current|subscriptions\/current\/billing|statistics\/current)$/,

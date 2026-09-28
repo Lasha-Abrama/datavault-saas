@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowUpRight, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { request } from "@/lib/api";
+import { googleSignInUrl, request } from "@/lib/api";
 import { Alert, Button, Field, Logo, Loading } from "@/components/ui";
 import LivingVault from "./living-vault";
 import { paymentReturnPaths } from "@/lib/payments";
@@ -30,7 +30,7 @@ const titles = {
   "reset-password": ["Reset your password.", "Account recovery"],
 };
 export default function AuthPage({ mode }) {
-  const { user, loading, login } = useAuth(),
+  const { user, loading, login, exchangeGoogle } = useAuth(),
     router = useRouter();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(null),
@@ -38,12 +38,63 @@ export default function AuthPage({ mode }) {
     [resendNotice, setResendNotice] = useState(""),
     [token, setToken] = useState(""),
     [tokenReady, setTokenReady] = useState(false),
-    [email, setEmail] = useState("");
+    [email, setEmail] = useState(""),
+    [oauthStatus, setOauthStatus] = useState(
+      mode === "login" ? "checking" : "idle",
+    );
   const captured = useRef(false);
+  const oauthCaptured = useRef(false);
+  const googleUrl = mode === "login" ? googleSignInUrl() : null;
   useEffect(() => {
-    if (!loading && user && ["login", "register"].includes(mode))
+    if (
+      !loading &&
+      user &&
+      oauthStatus === "idle" &&
+      ["login", "register"].includes(mode)
+    )
       router.replace(loginDestination());
-  }, [user, loading, mode, router]);
+  }, [user, loading, mode, oauthStatus, router]);
+  useEffect(() => {
+    if (mode !== "login" || oauthCaptured.current) return;
+    oauthCaptured.current = true;
+    const url = new URL(window.location.href);
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    const code = fragment.get("code");
+    const denied = url.searchParams.has("error");
+    if (code !== null || denied) {
+      if (denied) url.searchParams.delete("error");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        url.pathname + url.search,
+      );
+    }
+    if (denied) {
+      setError(
+        new Error("Google sign-in was cancelled. You can try again below."),
+      );
+      setOauthStatus("idle");
+      return;
+    }
+    if (code === null) {
+      setOauthStatus("idle");
+      return;
+    }
+    if (!/^[A-Za-z0-9_-]{43}$/.test(code)) {
+      setError(
+        new Error(
+          "This Google sign-in link is invalid. Please try Google sign-in again.",
+        ),
+      );
+      setOauthStatus("idle");
+      return;
+    }
+    setOauthStatus("exchanging");
+    void exchangeGoogle(code)
+      .then(() => router.replace(loginDestination()))
+      .catch((failure) => setError(failure))
+      .finally(() => setOauthStatus("idle"));
+  }, [mode, exchangeGoogle, router]);
   useEffect(() => {
     if (captured.current) return;
     captured.current = true;
@@ -193,8 +244,15 @@ export default function AuthPage({ mode }) {
                 Back to sign in
               </Link>
             </>
-          ) : loading && ["login", "register"].includes(mode) ? (
-            <Loading label="Checking your session" />
+          ) : (loading || oauthStatus !== "idle") &&
+            ["login", "register"].includes(mode) ? (
+            <Loading
+              label={
+                oauthStatus === "exchanging"
+                  ? "Completing Google sign-in"
+                  : "Checking your session"
+              }
+            />
           ) : (
             <form onSubmit={submit} className="form-stack">
               {activation && tokenReady && !token ? (
@@ -330,6 +388,17 @@ export default function AuthPage({ mode }) {
                 </>
               )}
             </form>
+          )}
+          {mode === "login" && googleUrl && oauthStatus === "idle" && (
+            <div className="oauth-choice">
+              <span className="oauth-divider">or</span>
+              <a className="button secondary full" href={googleUrl}>
+                Continue with Google <ArrowUpRight size={16} />
+              </a>
+              <p className="muted small">
+                Google sign-in is for existing, activated DataVault accounts.
+              </p>
+            </div>
           )}
           {(mode === "activate" || mode === "register" || mode === "login") && (
             <details className="resend">

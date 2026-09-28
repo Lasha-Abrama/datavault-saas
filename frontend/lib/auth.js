@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useContext, useEffect, useState } from "react";
-import { request, session } from "./api";
+import { ApiError, request, session } from "./api";
 const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null),
@@ -54,14 +54,31 @@ export function AuthProvider({ children }) {
       /* The backend validates token authenticity on every request. */
     }
   }, [user]);
+  async function establishSession(result) {
+    if (typeof result?.accessToken !== "string" || !result.accessToken)
+      throw new ApiError(502);
+    session.set(result.accessToken);
+    try {
+      setUser(await request("/auth/current-user"));
+    } catch (error) {
+      session.clear();
+      setUser(null);
+      throw error;
+    }
+  }
   async function login(body) {
-    const result = await request("/auth/sign-in", {
+    return establishSession(await request("/auth/sign-in", {
       method: "POST",
       body,
       public: true,
-    });
-    session.set(result.accessToken);
-    setUser(await request("/auth/current-user"));
+    }));
+  }
+  async function exchangeGoogle(code) {
+    return establishSession(await request("/auth/google/exchange", {
+      method: "POST",
+      body: { code },
+      public: true,
+    }));
   }
   function logout() {
     session.clear();
@@ -77,6 +94,7 @@ export function AuthProvider({ children }) {
         error,
         restore,
         login,
+        exchangeGoogle,
         logout,
         isAdmin: user?.role === "company_owner",
       }}
