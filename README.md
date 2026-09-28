@@ -507,6 +507,39 @@ Deletion refuses anything outside the untouched signup shape: non-null/missing c
 
 Only that exact company, its single owner, pristine Free subscription and zero/one verification records can be removed. All deletions use one snapshot/majority transaction with exact count checks; failures roll back partial work. Audit history is never deleted. It never contacts Stripe/AWS/SMTP or attempts S3 cleanup. A refusal requires investigation, not removing the safeguards. Reports contain no email, password/hash, verification token or database/provider exception text. Restart the application after maintenance. Repeat deletion reports `company_not_found`, not success.
 
+### Reset an unused Stripe Test Mode customer mapping (CLI only)
+
+After moving a **development/test** database to another Stripe Test Mode account, an old customer ID can prevent a new hosted Checkout. This command handles only an existing company that is still on the local **Free** plan with an unused Stripe customer mapping. It refuses Stripe-managed or paid subscriptions, a known subscription ID/status, a checkout session or attempted checkout/subscription creation, pending plan/schedule/lease/meter/sync state, and any company-scoped Stripe webhook-event or metered-usage record. A refusal means the old account and DataVault state require individual reconciliation; do not manually force a paid plan into an unmanaged state. It never calls Stripe or changes company/users/files/invitations, billing-period/upload records, AI records or platform-admin data. It does not delete webhook history or the usage outbox.
+
+Build, set `NODE_ENV=development` or `test` for the intended non-production database, and **dry-run** with the exact company ObjectId:
+
+```bash
+npm run build
+npm run maintenance:reset-stripe-test -- --company-id REPLACE_WITH_EXACT_COMPANY_ID
+```
+
+The JSON report lists field **names**, not Stripe identifier values, and gives the subscription `revision`. Confirm the company and plan independently. Before execution, configure the **new account's Test Mode** `STRIPE_SECRET_KEY` privately (the CLI checks its `sk_test_` shape but never calls Stripe or prints it), stop **all** API instances, payment workers and other writers using that database, and confirm no old-account Checkout/subscription operation or webhook delivery remains in flight. The CLI cannot inspect the old Stripe account or prove that distributed processes are stopped. Then use the revision from the dry run:
+
+```bash
+npm run maintenance:reset-stripe-test -- --company-id REPLACE_WITH_EXACT_COMPANY_ID --expected-revision REPLACE_WITH_DRY_RUN_REVISION --execute --confirm-reset --confirm-app-stopped --confirm-old-stripe-quiescent
+```
+
+Execution rechecks the exact company and subscription under a snapshot/majority MongoDB transaction, conditionally increments `revision`, and clears only Stripe provider mapping/operation/synchronization fields. It retains the Free plan, activation/billing anchor and all authoritative usage. `NODE_ENV=production` or an unset environment is refused even for a dry run. The confirmation flags are operator attestations, not process detection. No HTTP reset endpoint exists. The old Stripe customer remains in the old Test Mode account; handle that account separately if needed. Restart the application only after maintenance is complete.
+
+For the **separate, exact unmanaged Basic recovery case**, add `--recover-unmanaged-basic` to the dry run. This mode applies only when a local Basic subscription has `stripeManaged=false`, `paymentAccess=unmanaged`, `paymentSyncIssue=retry_required`, an old **Test Mode setup Checkout** for Premium, and no Stripe subscription ID or subscription-creation attempt. It also requires no company-scoped Stripe event/outbox records, exactly one owner and no employees, no live pending invitations, at most the Free allowance of successful uploads in the current activation-anchored period, and no recorded overage. These are the same capacity constraints used for a Free downgrade. A completed setup Checkout alone does not collect payment or create a subscription; DataVault creates the subscription in a later step, after recording its attempt. Any evidence that step began, any paid/managed state, or a failed Free capacity check causes refusal. Do not clear those states manually.
+
+```bash
+npm run maintenance:reset-stripe-test -- --company-id REPLACE_WITH_EXACT_COMPANY_ID --recover-unmanaged-basic
+```
+
+After independently reviewing the dry-run report and stopping every writer, confirm that the old Test Mode account has no in-flight Checkout/webhook activity. Run from an isolated `development`/`test` maintenance process connected only to the intended staging database, not from the Render production-mode web process. With the new account's `sk_test_` secret configured privately, use **the Basic recovery revision from this dry run**:
+
+```bash
+npm run maintenance:reset-stripe-test -- --company-id REPLACE_WITH_EXACT_COMPANY_ID --recover-unmanaged-basic --expected-revision REPLACE_WITH_DRY_RUN_REVISION --execute --confirm-reset --confirm-transition-to-free --confirm-app-stopped --confirm-old-stripe-quiescent
+```
+
+This transaction changes only that company's subscription: `planCode` becomes `free`, `planChangedAt` becomes the recovery time, `revision` increments, payment access/sync state becomes unmanaged/none, and old Stripe mapping/operation/sync fields are cleared. The original `activatedAt` billing anchor and every user, invitation, file, subscription-period/upload counter, AI record, other tenant and Stripe event/outbox record remain untouched. The old customer/setup session remain in the old Stripe account. After restarting DataVault with the new Test Mode account, the owner may begin a new hosted Checkout. A company that cannot fit Free needs explicit account/payment reconciliation; this utility cannot grant or preserve unpaid Basic access.
+
 ### Real API platform-admin smoke test
 
 Run against a local/test Nest API, with normal SMTP and frontend activation available. Use a **new accessible email address** (an operator-controlled alias works) and a dedicated password; each run registers a new fixture. Never supply an existing tenant/account. Start the application normally, then in an interactive terminal:
