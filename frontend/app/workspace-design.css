@@ -1690,6 +1690,30 @@ select:focus-visible {
     max-width: 100%;
   }
 }
+.oauth-choice {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+  text-align: center;
+}
+.oauth-divider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.oauth-divider::before,
+.oauth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: #dce3df;
+}
+.oauth-choice .button[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: wait;
+}
 @media (prefers-reduced-motion: reduce) {
   .data-float {
     animation: none;

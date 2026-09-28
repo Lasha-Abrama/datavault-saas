@@ -3129,13 +3129,28 @@ dialog {
   animation: robot-blink 7s infinite;
 }
 @keyframes robot-blink {
-  0%, 43%, 47%, 100% { transform: scaleY(1); }
-  45% { transform: scaleY(.12); }
+  0%,
+  43%,
+  47%,
+  100% {
+    transform: scaleY(1);
+  }
+  45% {
+    transform: scaleY(0.12);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .robot-eyes { animation: none; }
-  .robot-body, .chat-launcher { transition: none; }
-  .chat-launcher:hover, .chat-launcher:hover .robot-body { transform: none; }
+  .robot-eyes {
+    animation: none;
+  }
+  .robot-body,
+  .chat-launcher {
+    transition: none;
+  }
+  .chat-launcher:hover,
+  .chat-launcher:hover .robot-body {
+    transform: none;
+  }
 }
 .floating-chat-panel {
   width: 430px;

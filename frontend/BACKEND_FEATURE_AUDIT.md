@@ -1,4 +1,4 @@
-# Backend/frontend feature audit — 2026-09-27
+# Backend/frontend feature audit — 2026-09-28
 
 Compared the deployed OpenAPI schema and local backend controllers/services with the tenant frontend.
 
@@ -14,13 +14,16 @@ The handoff says `OPENROUTER_ENABLED=false`. The frontend cannot change Render c
 
 | Capability | Backend routes | Frontend status / reason |
 | --- | --- | --- |
-| Google OAuth | GET /auth/google, GET /auth/google/callback, POST /auth/google/exchange | Not integrated; Google OAuth is unconfigured according to the handoff. Needs browser-bound start, callback/code exchange, and error handling. |
 | Owner viewing/editing another employee’s profile | GET/PATCH /users/:id | Own profile is supported; employee-management page lists, invites, and deletes employees but does not offer employee detail/name-edit controls. |
 | Upload/download/delete stored files | POST /files, GET /files/:id/download, DELETE /files/:id | Implemented but intentionally gated by NEXT_PUBLIC_STORAGE_ENABLED=false until S3 is configured. Metadata and permission editing are enabled. |
 | Operational health display | GET /health/live, GET /health/ready | No dedicated service-status screen; these are operational endpoints, not required tenant product features. |
 | Separate Platform Admin console | POST /admin/auth/login; GET /admin/dashboard, /admin/companies, /admin/companies/:id, /admin/users, /admin/files, /admin/audit-logs; POST /admin/companies/:id/suspend and /reactivate | Intentionally excluded from the tenant frontend and gateway. Requires separate Platform Admin credentials and product scope. Platform audit logs are not a tenant activity feed. |
 
 Stripe's signed `/payments/webhook` is server-to-server functionality; it should not have a frontend control.
+
+## Google OAuth frontend completed
+
+Google OAuth is now integrated for existing accounts through direct browser navigation to the backend and `/auth/sign-in` fragment exchange. It shares email/password session handling, removes the code before exchange, and handles cancellation and exchange failures without automatic retries. The user reports Google is enabled on Render; the older handoff's disabled flag is historical. Unknown/inactive accounts and invalid browser state can return a backend callback error without a frontend redirect; no frontend page can intercept that response. Real Google account consent remains a manual production verification step; see README.
 
 ## Stripe frontend added
 

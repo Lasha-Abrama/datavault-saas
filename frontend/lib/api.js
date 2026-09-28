@@ -5,7 +5,10 @@ export function googleSignInUrl() {
     const base = new URL(process.env.NEXT_PUBLIC_API_URL);
     if (
       base.protocol !== "https:" &&
-      !(base.protocol === "http:" && ["localhost", "127.0.0.1"].includes(base.hostname))
+      !(
+        base.protocol === "http:" &&
+        ["localhost", "127.0.0.1"].includes(base.hostname)
+      )
     )
       return null;
     return new URL("/auth/google", base).toString();
@@ -106,9 +109,15 @@ export class ApiError extends Error {
       if (status === 400 || status === 401)
         this.message =
           "This Google sign-in link is invalid or has expired. Please try Google sign-in again.";
-      else if (status === 503 || status === 502 || status === 504)
+      else if (status === 403)
         this.message =
-          "Google sign-in is temporarily unavailable. Please try again shortly.";
+          "Google sign-in could not be completed securely. Please use email and password or try again later.";
+      else if (status >= 500)
+        this.message =
+          "Google sign-in is temporarily unavailable. Please start Google sign-in again shortly.";
+      else if (status === 0)
+        this.message =
+          "We couldn’t connect to DataVault. Check your connection, then start Google sign-in again.";
     }
     this.fields = {};
     if (status === 400 && Array.isArray(body?.message)) {
@@ -141,8 +150,13 @@ export class ApiError extends Error {
         "The invitation may have been saved, but its email could not be sent. Refresh the list and use Resend.";
   }
 }
-function expire(status, path, authenticated) {
-  if (status === 401 && authenticated && path !== "/users/me/password") {
+function expire(status, path, token) {
+  if (
+    status === 401 &&
+    token &&
+    session.get() === token &&
+    path !== "/users/me/password"
+  ) {
     session.clear();
     window.dispatchEvent(new Event("datavault:expired"));
   }
@@ -177,7 +191,7 @@ export async function request(
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      expire(response.status, path, !!token);
+      expire(response.status, path, token);
       throw new ApiError(response.status, data, path);
     }
     return binary
@@ -187,7 +201,7 @@ export async function request(
         : response.json();
   } catch (error) {
     if (signal?.aborted || error instanceof ApiError) throw error;
-    throw new ApiError(0);
+    throw new ApiError(0, undefined, path);
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
@@ -222,7 +236,7 @@ export function upload(file, permissions, onProgress, signal) {
       try {
         body = JSON.parse(xhr.responseText);
       } catch {}
-      expire(xhr.status, "/files", !!token);
+      expire(xhr.status, "/files", token);
       if (xhr.status >= 200 && xhr.status < 300) resolve(body);
       else reject(new ApiError(xhr.status, body, "/files"));
     };

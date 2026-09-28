@@ -60,18 +60,22 @@ export default function AuthPage({ mode }) {
     const url = new URL(window.location.href);
     const fragment = new URLSearchParams(url.hash.slice(1));
     const code = fragment.get("code");
-    const denied = url.searchParams.has("error");
-    if (code !== null || denied) {
-      if (denied) url.searchParams.delete("error");
+    const providerError = url.searchParams.get("error");
+    if (code !== null || providerError !== null) {
+      url.searchParams.delete("error");
       window.history.replaceState(
         window.history.state,
         "",
         url.pathname + url.search,
       );
     }
-    if (denied) {
+    if (providerError !== null) {
       setError(
-        new Error("Google sign-in was cancelled. You can try again below."),
+        new Error(
+          providerError === "google_auth_cancelled"
+            ? "Google sign-in was cancelled. You can try again below."
+            : "Google sign-in could not be completed. Please try again.",
+        ),
       );
       setOauthStatus("idle");
       return;
@@ -80,7 +84,10 @@ export default function AuthPage({ mode }) {
       setOauthStatus("idle");
       return;
     }
-    if (!/^[A-Za-z0-9_-]{43}$/.test(code)) {
+    if (
+      fragment.getAll("code").length !== 1 ||
+      !/^[A-Za-z0-9_-]{43}$/.test(code)
+    ) {
       setError(
         new Error(
           "This Google sign-in link is invalid. Please try Google sign-in again.",
@@ -389,17 +396,27 @@ export default function AuthPage({ mode }) {
               )}
             </form>
           )}
-          {mode === "login" && googleUrl && oauthStatus === "idle" && (
-            <div className="oauth-choice">
-              <span className="oauth-divider">or</span>
-              <a className="button secondary full" href={googleUrl}>
-                Continue with Google <ArrowUpRight size={16} />
-              </a>
-              <p className="muted small">
-                Google sign-in is for existing, activated DataVault accounts.
-              </p>
-            </div>
-          )}
+          {mode === "login" &&
+            googleUrl &&
+            !loading &&
+            oauthStatus === "idle" && (
+              <div className="oauth-choice">
+                <span className="oauth-divider">or</span>
+                <a
+                  className="button secondary full"
+                  href={googleUrl}
+                  aria-disabled={busy || undefined}
+                  onClick={(event) => {
+                    if (busy) event.preventDefault();
+                  }}
+                >
+                  Continue with Google <ArrowUpRight size={16} />
+                </a>
+                <p className="muted small">
+                  Google sign-in is for existing, activated DataVault accounts.
+                </p>
+              </div>
+            )}
           {(mode === "activate" || mode === "register" || mode === "login") && (
             <details className="resend">
               <summary>Need a new activation email?</summary>

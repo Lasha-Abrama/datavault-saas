@@ -1,12 +1,16 @@
 "use client";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { ApiError, request, session } from "./api";
 const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
+  const revision = useRef(0);
+  const signingIn = useRef(false);
   const [user, setUser] = useState(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(null);
   async function restore() {
+    if (signingIn.current) return;
+    const attempt = ++revision.current;
     setLoading(true);
     setError(null);
     if (!session.get()) {
@@ -15,11 +19,12 @@ export function AuthProvider({ children }) {
       return;
     }
     try {
-      setUser(await request("/auth/current-user"));
+      const restored = await request("/auth/current-user");
+      if (attempt === revision.current) setUser(restored);
     } catch (e) {
-      if (e.status !== 401) setError(e);
+      if (attempt === revision.current && e.status !== 401) setError(e);
     } finally {
-      setLoading(false);
+      if (attempt === revision.current) setLoading(false);
     }
   }
   useEffect(() => {
@@ -54,33 +59,55 @@ export function AuthProvider({ children }) {
       /* The backend validates token authenticity on every request. */
     }
   }, [user]);
-  async function establishSession(result) {
+  async function establishSession(result, attempt) {
+    if (attempt !== revision.current) return;
     if (typeof result?.accessToken !== "string" || !result.accessToken)
       throw new ApiError(502);
     session.set(result.accessToken);
     try {
-      setUser(await request("/auth/current-user"));
+      const authenticated = await request("/auth/current-user");
+      if (attempt === revision.current) setUser(authenticated);
     } catch (error) {
-      session.clear();
-      setUser(null);
+      if (attempt === revision.current) {
+        session.clear();
+        setUser(null);
+      }
       throw error;
     }
   }
-  async function login(body) {
-    return establishSession(await request("/auth/sign-in", {
-      method: "POST",
-      body,
-      public: true,
-    }));
+  async function authenticate(path, body) {
+    // Supersede any pending restoration before exchanging a one-use code.
+    const attempt = ++revision.current;
+    signingIn.current = true;
+    setError(null);
+    setUser(null);
+    session.clear();
+    try {
+      await establishSession(
+        await request(path, {
+          method: "POST",
+          body,
+          public: true,
+        }),
+        attempt,
+      );
+    } finally {
+      if (attempt === revision.current) {
+        signingIn.current = false;
+        setLoading(false);
+      }
+    }
   }
-  async function exchangeGoogle(code) {
-    return establishSession(await request("/auth/google/exchange", {
-      method: "POST",
-      body: { code },
-      public: true,
-    }));
+  function login(body) {
+    return authenticate("/auth/sign-in", body);
+  }
+  function exchangeGoogle(code) {
+    return authenticate("/auth/google/exchange", { code });
   }
   function logout() {
+    revision.current++;
+    signingIn.current = false;
+    setLoading(false);
     session.clear();
     setUser(null);
     setError(null);

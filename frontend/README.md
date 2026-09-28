@@ -71,6 +71,34 @@ No real account has been created or existing tenant data modified during develop
 - Desktop login/overview and mobile registration/billing screenshots reviewed. No mobile horizontal overflow at 390px.
 - Authenticated tenant mutations remain unverified against real accounts; no credentials were provided.
 
+## Google sign-in
+
+Verification on 2026-09-28: formatting check and production build passed. Complete Playwright suite: **31 passed, 2 failed**, with both failures isolated to the deployed backend's HTTPS detection (OAuth start and exchange return 403). All 14 focused OAuth UI tests passed, including owner/member sessions, duplicates, replay, cancellation, network/server errors, malformed responses, mobile layout, and password-login recovery. This JavaScript project has no configured lint or standalone typecheck script; their optional script invocations performed no checks. No commit, push, backend changes, or production frontend deployment were performed.
+
+Continues the `4dd5fc9` OAuth WIP. `/login` and `/auth/sign-in` share the existing auth page; Google is sign-in only. A normal browser navigation goes directly to `${NEXT_PUBLIC_API_URL}/auth/google` so the backend can set and validate its HttpOnly browser-state cookie. The gateway permits only POST `/auth/google/exchange`; it does not proxy OAuth start/callback or forward OAuth cookies.
+
+The callback fragment is removed with history replacement before a single exchange attempt. `{ code }` is exchanged through the existing API client. Both login methods establish the same sessionStorage Bearer session, verify `/auth/current-user`, and redirect to the dashboard. Failed profile lookup clears the partial session. Pending restoration cannot overwrite a newer sign-in. Codes are not logged, stored, or automatically retried. Expired/replayed codes require a fresh Google sign-in. No Google credentials belong in the frontend.
+
+Production configuration:
+- Vercel: `NEXT_PUBLIC_API_URL=https://datavault-saas.onrender.com` (rebuild after changing).
+- Render: `FRONT_URI=https://datavault-saas.vercel.app` and `GOOGLE_CALLBACK_URL=https://datavault-saas.onrender.com/auth/google/callback`.
+- Google OAuth client: authorized redirect URI must exactly match the Render callback above. Keep client secret on Render. If Google's consent screen is in testing mode, use an allowed test user.
+
+**Production blocker observed 2026-09-28:** a real HTTPS GET `/auth/google` returns 403 `HTTPS is required for Google sign-in`. The backend's HTTPS guard is seeing the upstream request as insecure. Its existing `TRUST_PROXY_HOPS` setting defaults to zero; the Render administrator must verify the trusted reverse-proxy path and set the correct hop count, then redeploy. Do not disable the guard, accept arbitrary forwarding headers, or blindly enable `trust proxy=true`. This is a deployment prerequisite, not a frontend credential issue. The live OAuth tests intentionally continue to fail until the deployed service honors HTTPS; they are not skipped or mocked.
+
+Manual production verification after deploying these frontend changes:
+1. Open `https://datavault-saas.vercel.app/login` in a private window. Use an existing, activated DataVault account with the same Google email.
+2. Click Continue with Google. Confirm full-page navigation through Render to Google. Sign in and approve. The final destination must be `/dashboard`; the address must contain neither a code nor a JWT.
+3. In DevTools Network, confirm exactly one POST to `/backend/auth/google/exchange` (200), followed by `/backend/auth/current-user` (200). Do not copy/export request bodies, tokens, HARs, or screenshots containing credentials. The exchange uses `{ code }`; only protected requests use Bearer authorization.
+4. Refresh the dashboard; the session should survive. Test an activated invited member too: its dashboard works, and Employees is absent. Log out and confirm protected pages return to sign-in.
+5. Start a new Google flow and choose Cancel/deny if Google offers it. Expect the friendly cancellation message on `/auth/sign-in`, a clean URL, and no exchange. A provider that skips consent may not offer this control; the exact backend cancellation redirect is also covered by automated tests.
+6. Open `/auth/sign-in` directly: normal sign-in, no exchange. Open `/auth/sign-in#code=invalid`: clean URL and friendly invalid-link message. For expiry/replay, automated tests cover backend rejection without retaining real codes; avoid manually sharing or logging live codes.
+7. To exercise a real expired exchange, block `**/backend/auth/google/exchange*` with DevTools request blocking before starting OAuth. Finish Google sign-in, wait over 60 seconds (the backend TTL), unblock, and resend that blocked request once from DevTools if your browser supports it. It must return 401. A second send of a previously successful exchange must also return 401. Do not export or retain the requests. Start a fresh Google flow to recover.
+8. With exchange request blocking enabled, complete Google sign-in: expect a connection error with a usable sign-in form and no automatic retries. Unblock and start a fresh Google flow. Confirm email/password sign-in still works.
+9. At mobile width, confirm both sign-in methods remain accessible and there is no horizontal overflow.
+
+Backend contract limitation: unregistered/inactive Google identities or invalid browser-bound state can produce JSON 401 on the Render callback rather than redirecting to the frontend. Return to `/login` and use an eligible account. The frontend does not bypass state validation or invent Google signup. End-to-end Google consent requires a real eligible account and is not proven by intercepted browser tests.
+
 ## AI Assistant
 
 The persistent lower-right chat widget integrates POST `/ai/chat`, GET `/ai/conversations?page=1&limit=20`, GET `/ai/conversations/:id`, and DELETE `/ai/conversations/:id`. Both roles have access to their own conversations. Model/provider configuration is server-controlled. If the backend returns `ai_disabled`, the page disables sending and explains that the service needs enabling; saved history remains readable. No API key is needed or accepted by this frontend. See `BACKEND_FEATURE_AUDIT.md` for the full feature comparison and deployment prerequisites.

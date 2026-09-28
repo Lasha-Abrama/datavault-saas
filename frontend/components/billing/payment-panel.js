@@ -161,8 +161,8 @@ export default function PaymentPanel({
             <div className="invoice-empty">
               <strong>No invoices yet</strong>
               <p>
-                Stripe invoices will appear here when they are issued.
-                Usage estimates are separate from Stripe invoices.
+                Stripe invoices will appear here when they are issued. Usage
+                estimates are separate from Stripe invoices.
               </p>
             </div>
           ) : (

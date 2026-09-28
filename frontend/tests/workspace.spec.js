@@ -1,5 +1,230 @@
 import { test, expect } from "@playwright/test";
 
+// Deliberately synthetic credentials, used only by intercepted test requests.
+const oauthCode = "o".repeat(43);
+const oauthToken = "oauth-test-only-session";
+const exchangePath = "http://localhost:3000/backend/auth/google/exchange";
+
+test("OAuth uses a document navigation and stays sign-in only", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  const google = page.getByRole("link", { name: "Continue with Google" });
+  await expect(google).toHaveAttribute(
+    "href",
+    "https://datavault-saas.onrender.com/auth/google",
+  );
+  await page.route(
+    "https://datavault-saas.onrender.com/auth/google",
+    async (r) => {
+      expect(r.request().isNavigationRequest()).toBe(true);
+      expect(r.request().method()).toBe("GET");
+      await r.fulfill({
+        contentType: "text/html",
+        body: "<h1>OAuth navigation fixture</h1>",
+      });
+    },
+  );
+  await google.click();
+  await expect(
+    page.getByRole("heading", { name: "OAuth navigation fixture" }),
+  ).toBeVisible();
+  await page.goto("/register");
+  await expect(google).toHaveCount(0);
+});
+
+for (const role of ["owner", "member"]) {
+  test(`OAuth ${role} success removes the fragment before a single exchange and restores on refresh`, async ({
+    page,
+  }) => {
+    await fixture(page, role, false);
+    let exchanges = 0;
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    await page.route(exchangePath, async (r) => {
+      exchanges++;
+      expect(r.request().method()).toBe("POST");
+      expect(r.request().postDataJSON()).toEqual({ code: oauthCode });
+      expect(r.request().headers().authorization).toBeUndefined();
+      expect(new URL(page.url()).hash).toBe("");
+      await gate;
+      await r.fulfill({ json: { accessToken: oauthToken } });
+    });
+    await page.goto(`/auth/sign-in#code=${oauthCode}`);
+    await expect(page.getByText("Completing Google sign-in")).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Continue with Google" }),
+    ).toHaveCount(0);
+    await expect(page).toHaveURL(/\/auth\/sign-in$/);
+    // Unrelated rerenders must not consume the one-use code again (including Strict Mode).
+    await page.getByRole("button", { name: "Open AI chat" }).click();
+    await expect.poll(() => exchanges).toBe(1);
+    const currentUser = page.waitForRequest((r) =>
+      r.url().endsWith("/auth/current-user"),
+    );
+    release();
+    expect((await currentUser).headers().authorization).toBe(
+      `Bearer ${oauthToken}`,
+    );
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(
+      page.getByRole("heading", { name: "The big picture." }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => sessionStorage.getItem("datavault.session")),
+    ).toBe(oauthToken);
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "The big picture." }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator(".sidebar")
+        .getByRole("link", { name: "Employees", exact: true }),
+    ).toHaveCount(role === "owner" ? 1 : 0);
+    expect(exchanges).toBe(1);
+  });
+}
+
+test("OAuth missing code, malformed code and denial never exchange; mobile form remains usable", async ({
+  page,
+}) => {
+  let exchanges = 0;
+  await page.route(exchangePath, (r) => {
+    exchanges++;
+    return r.fulfill({ status: 401, json: {} });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [suffix, error] of [
+    ["", null],
+    ["#code=", /link is invalid/],
+    ["#code=bad", /link is invalid/],
+    [`#code=${oauthCode}&code=${oauthCode}`, /link is invalid/],
+    ["?error=google_auth_cancelled", /sign-in was cancelled/],
+    [`?error=google_auth_cancelled#code=${oauthCode}`, /sign-in was cancelled/],
+    ["?error=untrusted-provider-message", /could not be completed/],
+  ]) {
+    // The backend callback is a full document navigation, not a hash-only change.
+    await page.goto("about:blank");
+    await page.goto(`/auth/sign-in${suffix}`);
+    await expect(
+      page.getByRole("button", { name: "Sign in to your workspace" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/auth\/sign-in$/);
+    if (error)
+      await expect(page.getByRole("main").getByRole("alert")).toContainText(
+        error,
+      );
+    else await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  expect(exchanges).toBe(0);
+  await page.screenshot({
+    path: "test-results/oauth-mobile.png",
+    fullPage: true,
+  });
+});
+
+for (const failure of [400, 401, 403, 429, 500, 503, "network"]) {
+  test(`OAuth exchange ${failure} is recoverable without automatic replay`, async ({
+    page,
+  }) => {
+    let exchanges = 0;
+    await page.route(exchangePath, (r) => {
+      exchanges++;
+      return failure === "network"
+        ? r.abort("failed")
+        : r.fulfill({
+            status: failure,
+            json: { message: "private backend details" },
+          });
+    });
+    await page.goto(`/auth/sign-in#code=${oauthCode}`);
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(
+      failure === 400 || failure === 401
+        ? /invalid or has expired/
+        : failure === 403
+          ? /could not be completed securely/
+          : failure === 429
+            ? /Too many requests/
+            : failure === 503 || failure === 500
+              ? /temporarily unavailable/
+              : /couldn’t connect/,
+    );
+    await expect(page.getByRole("main").getByRole("alert")).not.toContainText(
+      "private backend details",
+    );
+    await expect(
+      page.getByRole("link", { name: "Continue with Google" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => sessionStorage.getItem("datavault.session")),
+    ).toBeNull();
+    await page.reload();
+    await expect(
+      page.getByRole("button", { name: "Sign in to your workspace" }),
+    ).toBeVisible();
+    expect(exchanges).toBe(1);
+  });
+}
+
+test("OAuth failed user lookup clears the partial session, and password sign-in still works", async ({
+  page,
+}) => {
+  await fixture(page, "owner", false);
+  await page.route(exchangePath, (r) =>
+    r.fulfill({ json: { accessToken: oauthToken } }),
+  );
+  await page.route(`${api}/auth/current-user`, (r) =>
+    r.fulfill({ status: 503, json: {} }),
+  );
+  await page.goto(`/auth/sign-in#code=${oauthCode}`);
+  await expect(page.getByRole("main").getByRole("alert")).toContainText(
+    /temporarily unavailable/,
+  );
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("datavault.session")),
+  ).toBeNull();
+  await page.unroute(`${api}/auth/current-user`);
+  await page.route(`${api}/auth/sign-in`, (r) =>
+    r.fulfill({ json: { accessToken: "password-test-session" } }),
+  );
+  await page
+    .getByLabel("Work email", { exact: true })
+    .fill("alex@example.test");
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill("Example-password-123");
+  await page.getByRole("button", { name: "Sign in to your workspace" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+});
+
+test("OAuth supersedes an existing session instead of restoring the previous user", async ({
+  page,
+}) => {
+  await fixture(page, "member");
+  let exchanges = 0;
+  await page.route(exchangePath, async (r) => {
+    exchanges++;
+    await r.fulfill({ json: { accessToken: oauthToken } });
+  });
+  await page.goto(`/auth/sign-in#code=${oauthCode}`);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(
+    page.getByRole("heading", { name: "The big picture." }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("datavault.session")),
+  ).toBe(oauthToken);
+  expect(exchanges).toBe(1);
+});
+
 function paymentFixture(overrides = {}) {
   return {
     mode: "test",
@@ -19,6 +244,42 @@ function paymentFixture(overrides = {}) {
     ...overrides,
   };
 }
+
+test("OAuth replay is rejected after logout and malformed success never creates a session", async ({
+  page,
+}) => {
+  await fixture(page, "owner", false);
+  let calls = 0;
+  await page.route(exchangePath, (r) => {
+    calls++;
+    return r.fulfill(
+      calls === 1
+        ? { json: { accessToken: oauthToken } }
+        : { status: 401, json: {} },
+    );
+  });
+  await page.goto(`/auth/sign-in#code=${oauthCode}`);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await page.goto(`/auth/sign-in#code=${oauthCode}`);
+  await expect(page.getByRole("main").getByRole("alert")).toContainText(
+    /invalid or has expired/,
+  );
+  expect(calls).toBe(2);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("datavault.session")),
+  ).toBeNull();
+  await page.route(exchangePath, (r) =>
+    r.fulfill({ json: { unexpected: true } }),
+  );
+  await page.goto("about:blank");
+  await page.goto(`/auth/sign-in#code=${oauthCode}`);
+  await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("datavault.session")),
+  ).toBeNull();
+});
 test("billing distinguishes disabled Stripe from an outage", async ({
   page,
 }) => {
@@ -414,10 +675,11 @@ const files = [
   },
 ];
 // Fixtures exist only in automated tests. The application always uses the real API.
-async function fixture(page, role = "owner") {
-  await page.addInitScript(() =>
-    sessionStorage.setItem("datavault.session", "test-only-session"),
-  );
+async function fixture(page, role = "owner", signedIn = true) {
+  if (signedIn)
+    await page.addInitScript(() =>
+      sessionStorage.setItem("datavault.session", "test-only-session"),
+    );
   await page.route(`${api}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname.replace(
       /^\/backend/,
@@ -431,6 +693,7 @@ async function fixture(page, role = "owner") {
       return;
     }
     const bodies = {
+      "/ai/conversations": { conversations: [], total: 0, page: 1, limit: 20 },
       "/auth/current-user": role === "owner" ? owner : member,
       "/companies/current": {
         name: "Northstar Studio",
