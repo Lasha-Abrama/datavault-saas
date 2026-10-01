@@ -680,6 +680,29 @@ export function applyOpenApiMetadata() {
       error('Platform Admin login rate limit exceeded.'),
     ),
   );
+  decorateMethod(
+    AdminAuthController,
+    'forgotPassword',
+    ApiOperation({
+      summary: 'Email a one-time Platform Admin password reset link',
+    }),
+    ApiOkResponse({
+      description: 'Generic response for all valid email addresses.',
+    }),
+    ApiTooManyRequestsResponse(error('Password recovery rate limit exceeded.')),
+  );
+  decorateMethod(
+    AdminAuthController,
+    'resetPassword',
+    ApiOperation({
+      summary: 'Reset a Platform Admin password with a one-time link',
+    }),
+    ApiOkResponse({
+      description: 'Password changed and older sessions invalidated.',
+    }),
+    ApiUnauthorizedResponse(error('Reset link is invalid or expired.')),
+    ApiTooManyRequestsResponse(error('Password reset rate limit exceeded.')),
+  );
 
   adminController(AdminController);
   decorateMethod(

@@ -22,7 +22,9 @@ import {
   AdminCompanyQueryDto,
   AdminEmptyDto,
   AdminFileQueryDto,
+  AdminForgotPasswordDto,
   AdminLoginDto,
+  AdminResetPasswordDto,
   AdminUserQueryDto,
   SuspendCompanyDto,
 } from './dto/admin.dto';
@@ -44,6 +46,32 @@ export class AdminAuthController {
   login(@Body() dto: AdminLoginDto, @Query() query: AdminEmptyDto) {
     void query;
     return this.auth.login(dto);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(200)
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ publicAuth: { limit: 5, ttl: 60000 } })
+  forgotPassword(
+    @Body() dto: AdminForgotPasswordDto,
+    @Query() query: AdminEmptyDto,
+  ) {
+    void query;
+    return this.auth.forgotPassword(dto);
+  }
+
+  @Post('reset-password')
+  @HttpCode(200)
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ publicAuth: { limit: 5, ttl: 60000 } })
+  resetPassword(
+    @Body() dto: AdminResetPasswordDto,
+    @Query() query: AdminEmptyDto,
+  ) {
+    void query;
+    return this.auth.resetPassword(dto);
   }
 }
 

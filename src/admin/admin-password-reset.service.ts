@@ -97,7 +97,15 @@ export class AdminPasswordResetService {
 
           const changed = await this.admins.updateOne(
             { _id: admin._id, email: input.email, isActive: true },
-            { $set: { password: hash } },
+            {
+              $set: { password: hash },
+              $inc: { authVersion: 1 },
+              $unset: {
+                passwordResetTokenHash: '',
+                passwordResetExpiresAt: '',
+                passwordResetRequestedAt: '',
+              },
+            },
             { session, timestamps: false },
           );
           if (changed.matchedCount !== 1 || changed.modifiedCount !== 1)

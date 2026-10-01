@@ -19,6 +19,7 @@ import { BillingService } from '../src/subscriptions/billing.service';
 import { billingPeriod } from '../src/subscriptions/billing-period';
 import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
 import { AuthService } from '../src/auth/auth.service';
+import { EmailMessage } from '../src/email/email-sender';
 
 type Row = Record<string, unknown>;
 class FixtureConfig extends ConfigService {
@@ -318,14 +319,18 @@ function model(rows: Row[], name: string, registry: Record<string, Row[]>) {
         return new Query(row ?? null);
       },
     ),
-    updateOne: jest.fn((filter: Row, update: { $set?: Row; $unset?: Row }) => {
-      const row = rows.find((value) => matches(value, filter));
-      if (row) {
-        Object.assign(row, update.$set);
-        for (const key of Object.keys(update.$unset ?? {})) delete row[key];
-      }
-      return Promise.resolve({ modifiedCount: row ? 1 : 0 });
-    }),
+    updateOne: jest.fn(
+      (filter: Row, update: { $set?: Row; $inc?: Row; $unset?: Row }) => {
+        const row = rows.find((value) => matches(value, filter));
+        if (row) {
+          Object.assign(row, update.$set);
+          for (const [key, value] of Object.entries(update.$inc ?? {}))
+            row[key] = Number(row[key] ?? 0) + Number(value);
+          for (const key of Object.keys(update.$unset ?? {})) delete row[key];
+        }
+        return Promise.resolve({ modifiedCount: row ? 1 : 0 });
+      },
+    ),
     deleteOne: jest.fn((filter: Row) => {
       const index = rows.findIndex((value) => matches(value, filter));
       if (index >= 0) rows.splice(index, 1);
@@ -346,6 +351,7 @@ function model(rows: Row[], name: string, registry: Record<string, Row[]>) {
 export async function adminFixture() {
   const config = new FixtureConfig({
     JWT_SECRET: 'fixture-root-secret-of-at-least-32-characters',
+    ACCOUNT_ACTIVATION_URL: 'https://client.fixture.test/activate',
     TRUST_PROXY_HOPS: 0,
     STRIPE_ENABLED: true,
     PLATFORM_ADMIN_BOOTSTRAP_EMAIL: '',
@@ -522,6 +528,9 @@ export async function adminFixture() {
     { enabled: true } as never,
   );
   const jwt = new JwtService(platformAdminJwtOptions(config));
+  const emailSender = {
+    send: jest.fn<Promise<void>, [EmailMessage]>().mockResolvedValue(undefined),
+  };
   const tenantJwt = new JwtService({
     secret: config.getOrThrow<string>('JWT_SECRET'),
     signOptions: { algorithm: 'HS256', expiresIn: '1h' },
@@ -543,6 +552,9 @@ export async function adminFixture() {
     models.platformAdmin as never,
     models.adminAudit as never,
     jwt,
+    connection as unknown as Connection,
+    config,
+    emailSender,
   );
   const tenantAuth = new AuthService(
     models.user as never,
@@ -562,6 +574,7 @@ export async function adminFixture() {
     tenantJwt,
     service,
     auth,
+    emailSender,
     tenantAuth,
     subscriptionsService,
     plans,

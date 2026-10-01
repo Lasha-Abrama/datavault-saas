@@ -101,7 +101,7 @@ describe('OpenAPI document', () => {
       0,
     );
 
-    expect(operationCount).toBe(54);
+    expect(operationCount).toBe(56);
     expect(document.info).toMatchObject({
       title: 'DataVault SaaS API',
       version: '1.0',
@@ -249,7 +249,7 @@ describe('OpenAPI document', () => {
       for (const [method, candidate] of Object.entries(item ?? {})) {
         if (!httpMethods.has(method)) continue;
         const operation = candidate as OperationObject;
-        if (path.startsWith('/admin/') && path !== '/admin/auth/login')
+        if (path.startsWith('/admin/') && !path.startsWith('/admin/auth/'))
           expect(operation.security).toEqual([{ [PLATFORM_ADMIN_JWT]: [] }]);
         else if (
           path.startsWith('/files') ||

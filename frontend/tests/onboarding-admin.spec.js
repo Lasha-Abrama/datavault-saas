@@ -101,3 +101,67 @@ test("platform admin uses a separate token and displays backend data", async ({
     fullPage: true,
   });
 });
+
+test("platform admin can request and use an email password reset link", async ({
+  page,
+}) => {
+  let requested;
+  let reset;
+  await page.route("**/backend/admin/auth/forgot-password", (route) => {
+    requested = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        message:
+          "If this is an active platform admin email, a reset link will arrive shortly.",
+      },
+    });
+  });
+  await page.route("**/backend/admin/auth/reset-password", (route) => {
+    reset = route.request().postDataJSON();
+    return route.fulfill({ json: { reset: true } });
+  });
+  await page.goto("/admin");
+  await page.getByRole("button", { name: "Forgot admin password?" }).click();
+  await page.getByLabel("Admin email").fill("platform@example.com");
+  await page.getByRole("button", { name: "Email reset link" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toBeVisible();
+  expect(requested).toEqual({ email: "platform@example.com" });
+
+  await page.goto(`/admin#reset=${"A".repeat(43)}`);
+  await expect(
+    page.getByRole("heading", { name: "Set a new password" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.screenshot({
+    path: "test-results/admin-reset-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: "test-results/admin-reset-mobile.png",
+    fullPage: true,
+  });
+  await page
+    .getByLabel("New password", { exact: true })
+    .fill("New-Platform-Password42!");
+  await page.getByLabel("Confirm new password").fill("Different-Password42!");
+  await page.getByRole("button", { name: "Reset password" }).click();
+  await expect(page.locator(".platform-error")).toContainText(
+    "Passwords do not match",
+  );
+  expect(reset).toBeUndefined();
+  await page
+    .getByLabel("Confirm new password")
+    .fill("New-Platform-Password42!");
+  await page.getByRole("button", { name: "Reset password" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Platform administration" }),
+  ).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Password updated");
+  expect(reset).toEqual({
+    token: "A".repeat(43),
+    newPassword: "New-Platform-Password42!",
+  });
+});

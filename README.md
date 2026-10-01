@@ -438,7 +438,7 @@ Relevant official references: [hosted card setup](https://docs.stripe.com/paymen
 
 ## DataVault platform administration
 
-A **platform administrator** is a separate identity in `platformadmins`, with no company membership. A `company_owner` administers only their own tenant and cannot access `/admin`. Platform tokens cannot authenticate to tenant endpoints, including file downloads. There is no public platform registration, impersonation, company deletion, password editing, quota editing, or provider-state editing API.
+A **platform administrator** is a separate identity in `platformadmins`, with no company membership. A `company_owner` administers only their own tenant and cannot access `/admin`. Platform tokens cannot authenticate to tenant endpoints, including file downloads. There is no public platform registration, impersonation, company deletion, administrator-to-administrator password editing, quota editing, or provider-state editing API.
 
 ### Bootstrap and authentication
 
@@ -458,14 +458,16 @@ npm run admin:bootstrap
 
 Bootstrap starts only an isolated database application context, without HTTP, SMTP, S3 or payment workers. It awaits indexes and creates the bcrypt cost-12 password hash and bootstrap audit entry transactionally. Repeating the command for an existing email leaves credentials unchanged; it does not reset passwords or reactivate disabled administrator identities. Creating another explicit email is also a privileged CLI operation. Remove bootstrap credentials from runtime configuration after use. Command output never contains identity or credential values.
 
-If an existing active platform administrator forgets the bootstrap password, build and run the dedicated interactive maintenance command:
+An active platform administrator can select **Forgot admin password?** on `/admin`. The API emails a one-time reset link to the account's email through the configured SMTP or Resend sender. The link points to `/admin` on the `ACCOUNT_ACTIVATION_URL` origin, expires after 30 minutes, and can be used once. A new password must meet the bootstrap policy. Resetting invalidates earlier platform sessions. The request response does not reveal whether the email belongs to an administrator. Verify that the activation URL's origin is the frontend serving `/admin`.
+
+If email recovery is unavailable, build and run the dedicated interactive maintenance command:
 
 ```bash
 npm run build
 npm run admin:reset-password -- --confirm-platform-admin-password-reset
 ```
 
-The command requires the exact existing administrator email, a new password entered twice, and the exact email entered again, all through non-echoing TTY prompts. The new password uses the same 12-character/72-byte, uppercase, lowercase, digit and special-character policy and bcrypt cost 12 as bootstrap. It refuses unknown or inactive administrators and has no force/reactivation mode. One MongoDB transaction changes only that administrator's password and appends a `password_reset` audit event; no password or hash is stored in the audit record. It never starts HTTP or calls tenant, Stripe, S3 or SMTP services. There is no password recovery or reset HTTP endpoint.
+The command requires the exact existing administrator email, a new password entered twice, and the exact email entered again, all through non-echoing TTY prompts. The new password uses the same 12-character/72-byte, uppercase, lowercase, digit and special-character policy and bcrypt cost 12 as bootstrap. It refuses unknown or inactive administrators and has no force/reactivation mode. One MongoDB transaction changes only that administrator's password and appends a `password_reset` audit event; no password or hash is stored in the audit record. It also invalidates earlier platform sessions and pending email reset links. It never starts HTTP or calls tenant, Stripe, S3 or SMTP services.
 
 `POST /admin/auth/login` accepts `{ "email": "…", "password": "…" }` and returns `{ "accessToken": "…" }`. Login is limited to 5 requests/minute per IP with the existing in-memory throttler. Administrator JWTs last 30 minutes and use HS256 with explicit issuer, audience and token purpose. Their signing key is derived from `JWT_SECRET` using HKDF-SHA256 with a separate purpose; rotating `JWT_SECRET` invalidates both tenant and platform tokens. Every admin request checks the administrator's current `isActive` database state. Successful and credential-failed logins are audited; unknown accounts are recorded without submitted identity information. Authentication fails closed if audit persistence fails.
 

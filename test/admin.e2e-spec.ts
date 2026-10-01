@@ -62,7 +62,7 @@ describe('platform-admin / tenant security boundary (e2e, mocked infrastructure)
       .overrideProvider(ObjectStorage)
       .useValue(storage)
       .overrideProvider(EmailSender)
-      .useValue({ send: jest.fn() });
+      .useValue(f.emailSender);
     for (const [name, model] of Object.entries(f.models))
       builder.overrideProvider(getModelToken(name)).useValue(model);
     const module = await builder.compile();
@@ -114,6 +114,97 @@ describe('platform-admin / tenant security boundary (e2e, mocked infrastructure)
       .send({})
       .expect(404);
     expect(f.platformadmins).toHaveLength(1);
+  });
+
+  it('recovers an admin by email with a one-use link and revokes old sessions', async () => {
+    const generic = {
+      message:
+        'If this is an active platform admin email, a reset link will arrive shortly.',
+    };
+    const unknown = await request(app.getHttpServer())
+      .post('/admin/auth/forgot-password')
+      .send({ email: 'unknown@fixture.test' })
+      .expect(200);
+    expect(unknown.body).toEqual(generic);
+    expect(f.emailSender.send).not.toHaveBeenCalled();
+
+    const requested = await request(app.getHttpServer())
+      .post('/admin/auth/forgot-password')
+      .send({ email: ' PLATFORM@fixture.test ' })
+      .expect(200)
+      .expect('Cache-Control', 'private, no-store');
+    expect(requested.body).toEqual(generic);
+    expect(f.emailSender.send).toHaveBeenCalledTimes(1);
+    const message = f.emailSender.send.mock.calls[0][0];
+    expect(message.to).toBe('platform@fixture.test');
+    expect(message.text).toContain('https://client.fixture.test/admin#reset=');
+    const resetToken = message.text.match(/#reset=([A-Za-z0-9_-]{43})/)?.[1];
+    expect(resetToken).toBeDefined();
+    expect(JSON.stringify(f.platformadmins)).not.toContain(resetToken);
+
+    await request(app.getHttpServer())
+      .post('/admin/auth/forgot-password')
+      .send({ email: 'platform@fixture.test' })
+      .expect(200);
+    expect(f.emailSender.send).toHaveBeenCalledTimes(1);
+
+    const newPassword = 'New-Platform-Password42!';
+    await request(app.getHttpServer())
+      .post('/admin/auth/reset-password')
+      .send({ token: resetToken, newPassword })
+      .expect(200)
+      .expect({ reset: true });
+    await request(app.getHttpServer())
+      .get('/admin/dashboard')
+      .set(auth())
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/admin/auth/reset-password')
+      .send({ token: resetToken, newPassword })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/admin/auth/login')
+      .send({ email: 'platform@fixture.test', password: f.password })
+      .expect(401);
+    const fresh = await request(app.getHttpServer())
+      .post('/admin/auth/login')
+      .send({ email: 'platform@fixture.test', password: newPassword })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/admin/dashboard')
+      .set(auth((fresh.body as { accessToken: string }).accessToken))
+      .expect(200);
+    expect(f.adminaudits.some((row) => row.action === 'password_reset')).toBe(
+      true,
+    );
+  });
+
+  it('rejects expired links and keeps the password unchanged if reset auditing fails', async () => {
+    await request(app.getHttpServer())
+      .post('/admin/auth/forgot-password')
+      .send({ email: 'platform@fixture.test' })
+      .expect(200);
+    const message = f.emailSender.send.mock.calls[0][0];
+    const resetToken = message.text.match(/#reset=([A-Za-z0-9_-]{43})/)?.[1];
+    const admin = f.platformadmins[0];
+    admin.passwordResetExpiresAt = new Date(Date.now() - 1000);
+    await request(app.getHttpServer())
+      .post('/admin/auth/reset-password')
+      .send({ token: resetToken, newPassword: 'Another-Platform-Password42!' })
+      .expect(401);
+    f.platformadmins[0].passwordResetExpiresAt = new Date(Date.now() + 60000);
+    f.models.adminAudit.create.mockRejectedValueOnce(
+      new Error('audit unavailable'),
+    );
+    await request(app.getHttpServer())
+      .post('/admin/auth/reset-password')
+      .send({ token: resetToken, newPassword: 'Another-Platform-Password42!' })
+      .expect(503);
+    await request(app.getHttpServer())
+      .post('/admin/auth/login')
+      .send({ email: 'platform@fixture.test', password: f.password })
+      .expect(200);
+    expect(f.platformadmins[0].passwordResetTokenHash).toBeDefined();
   });
 
   it('rate-limits generic failed admin login attempts and audits only safe information', async () => {

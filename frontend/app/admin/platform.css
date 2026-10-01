@@ -28,6 +28,26 @@
 .platform-login-card .text-link {
   justify-self: center;
 }
+.platform-text-button {
+  justify-self: center;
+  color: var(--teal-dark);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.platform-text-button:hover {
+  color: var(--teal);
+}
+.platform-text-button:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 4px;
+}
+.platform-notice {
+  background: var(--mint);
+  color: var(--teal-dark);
+  padding: 12px 15px;
+  border-radius: 8px;
+}
 .platform-shell {
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);

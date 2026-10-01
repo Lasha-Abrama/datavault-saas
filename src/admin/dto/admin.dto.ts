@@ -25,6 +25,7 @@ import {
 import { PaymentAccess } from '../../payments/payment.constants';
 import { PlanCode } from '../../plans/plan.constants';
 import { AdminAuditAction } from '../entities/admin-audit.entity';
+import { validPlatformAdminPassword } from '../admin-security';
 
 export class AdminLoginDto {
   @ApiProperty({ format: 'email', minLength: 3, maxLength: 254 })
@@ -46,6 +47,37 @@ export class AdminLoginDto {
     },
   })
   password: string;
+}
+
+export class AdminForgotPasswordDto {
+  @ApiProperty({ format: 'email', minLength: 3, maxLength: 254 })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
+  @IsEmail()
+  @Length(3, 254)
+  email: string;
+}
+
+export class AdminResetPasswordDto {
+  @ApiProperty({ minLength: 43, maxLength: 43, writeOnly: true })
+  @IsString()
+  @ValidateBy({
+    name: 'adminResetToken',
+    validator: {
+      validate: (value: unknown) =>
+        typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value),
+    },
+  })
+  token: string;
+
+  @ApiProperty({ minLength: 12, maxLength: 72, writeOnly: true })
+  @IsString()
+  @ValidateBy({
+    name: 'platformAdminPassword',
+    validator: { validate: validPlatformAdminPassword },
+  })
+  newPassword: string;
 }
 
 export class AdminEmptyDto {}

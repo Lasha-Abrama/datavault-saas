@@ -42,6 +42,9 @@ async function api(path, { token, method = "GET", body } = {}) {
 
 export default function PlatformAdmin() {
   const [token, setToken] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [resetToken, setResetToken] = useState("");
+  const [notice, setNotice] = useState("");
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState(0);
   const [page, setPage] = useState(1);
@@ -53,8 +56,31 @@ export default function PlatformAdmin() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    setToken(sessionStorage.getItem(key));
+    function openResetLink() {
+      const fragment = new URLSearchParams(window.location.hash.slice(1));
+      const linkToken = fragment.get("reset");
+      if (!linkToken) return false;
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+      sessionStorage.removeItem(key);
+      setToken(null);
+      setResetToken(linkToken);
+      setAuthMode("reset");
+      setNotice("");
+      setError(
+        /^[A-Za-z0-9_-]{43}$/.test(linkToken)
+          ? ""
+          : "This reset link is invalid. Request a new one.",
+      );
+      return true;
+    }
+    if (!openResetLink()) setToken(sessionStorage.getItem(key));
+    window.addEventListener("hashchange", openResetLink);
     setReady(true);
+    return () => window.removeEventListener("hashchange", openResetLink);
   }, []);
   useEffect(() => {
     if (!token) return;
@@ -103,6 +129,73 @@ export default function PlatformAdmin() {
       setBusy(false);
     }
   }
+  async function forgotPassword(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api("auth/forgot-password", {
+        method: "POST",
+        body: Object.fromEntries(new FormData(event.currentTarget)),
+      });
+      setNotice(
+        "If this is an active platform admin email, a reset link will arrive shortly. Check your inbox and spam folder.",
+      );
+      setAuthMode("sent");
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resetPassword(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const newPassword = form.get("newPassword");
+    if (newPassword !== form.get("confirmPassword")) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (
+      typeof newPassword !== "string" ||
+      newPassword.length < 12 ||
+      new TextEncoder().encode(newPassword).length > 72 ||
+      !/[a-z]/.test(newPassword) ||
+      !/[A-Z]/.test(newPassword) ||
+      !/\d/.test(newPassword) ||
+      !/[^A-Za-z0-9\s]/.test(newPassword)
+    ) {
+      setError(
+        "Use 12–72 bytes with uppercase and lowercase letters, a number, and a symbol.",
+      );
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api("auth/reset-password", {
+        method: "POST",
+        body: { token: resetToken, newPassword },
+      });
+      setResetToken("");
+      setAuthMode("login");
+      setNotice("Password updated. Sign in with your new password.");
+    } catch (failure) {
+      setError(
+        failure.status === 401
+          ? "This reset link has expired or was already used. Request a new one."
+          : failure.message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  function changeAuthMode(mode) {
+    setAuthMode(mode);
+    if (mode !== "reset") setResetToken("");
+    setError("");
+    setNotice("");
+  }
   async function openCompany(id) {
     setError("");
     try {
@@ -148,35 +241,127 @@ export default function PlatformAdmin() {
         <div className="platform-login-card">
           <Logo />
           <ShieldCheck size={32} aria-hidden="true" />
-          <h1>Platform administration</h1>
-          <p>Use your separate DataVault platform admin credentials.</p>
+          <h1>
+            {authMode === "login"
+              ? "Platform administration"
+              : authMode === "reset"
+                ? "Set a new password"
+                : authMode === "sent"
+                  ? "Check your email"
+                  : "Recover admin access"}
+          </h1>
+          <p>
+            {authMode === "login"
+              ? "Use your separate DataVault platform admin credentials."
+              : authMode === "reset"
+                ? "Choose a new password for your platform admin account."
+                : authMode === "sent"
+                  ? "Follow the one-time link in the email to continue."
+                  : "Enter your platform admin email to receive a reset link."}
+          </p>
           {error && (
             <p className="platform-error" role="alert">
               {error}
             </p>
           )}
-          <form onSubmit={login} className="form-stack">
-            <Field
-              label="Admin email"
-              name="email"
-              type="email"
-              autoComplete="username"
-              required
-            />
-            <Field
-              label="Password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-            />
-            <Button busy={busy} className="full">
-              Sign in to platform <ArrowRight size={16} />
-            </Button>
-          </form>
-          <Link href="/login" className="text-link">
-            Company workspace sign in
-          </Link>
+          {notice && (
+            <p className="platform-notice" role="status">
+              {notice}
+            </p>
+          )}
+          {authMode === "login" && (
+            <>
+              <form onSubmit={login} className="form-stack">
+                <Field
+                  label="Admin email"
+                  name="email"
+                  type="email"
+                  autoComplete="username"
+                  required
+                />
+                <Field
+                  label="Password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                />
+                <Button busy={busy} className="full">
+                  Sign in to platform <ArrowRight size={16} />
+                </Button>
+              </form>
+              <button
+                type="button"
+                className="platform-text-button"
+                onClick={() => changeAuthMode("forgot")}
+              >
+                Forgot admin password?
+              </button>
+              <Link href="/login" className="text-link">
+                Company workspace sign in
+              </Link>
+            </>
+          )}
+          {authMode === "forgot" && (
+            <form onSubmit={forgotPassword} className="form-stack">
+              <Field
+                label="Admin email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+              />
+              <Button busy={busy} className="full">
+                Email reset link <ArrowRight size={16} />
+              </Button>
+            </form>
+          )}
+          {authMode === "reset" && (
+            <form onSubmit={resetPassword} className="form-stack">
+              <Field
+                label="New password"
+                name="newPassword"
+                type="password"
+                autoComplete="new-password"
+                minLength={12}
+                required
+                hint="At least 12 characters with uppercase and lowercase letters, a number, and a symbol."
+              />
+              <Field
+                label="Confirm new password"
+                name="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                minLength={12}
+                required
+              />
+              <Button
+                busy={busy}
+                disabled={!/^[A-Za-z0-9_-]{43}$/.test(resetToken)}
+                className="full"
+              >
+                Reset password <ArrowRight size={16} />
+              </Button>
+            </form>
+          )}
+          {authMode !== "login" && (
+            <button
+              type="button"
+              className="platform-text-button"
+              onClick={() => changeAuthMode("login")}
+            >
+              Back to admin sign in
+            </button>
+          )}
+          {authMode === "reset" && (
+            <button
+              type="button"
+              className="platform-text-button"
+              onClick={() => changeAuthMode("forgot")}
+            >
+              Request a new link
+            </button>
+          )}
         </div>
       </main>
     );

@@ -10,6 +10,7 @@ import { subscriptionSchema } from '../subscriptions/entities/subscription.entit
 import { subscriptionPeriodSchema } from '../subscriptions/entities/subscription-period.entity';
 import { employeeInvitationSchema } from '../invitations/entities/employee-invitation.entity';
 import { SubscriptionsDomainModule } from '../subscriptions/subscriptions-domain.module';
+import { EmailModule } from '../email/email.module';
 import { AdminAuthService } from './admin-auth.service';
 import { PLATFORM_ADMIN_JWT, platformAdminJwtOptions } from './admin-security';
 import { AdminAuthController, AdminController } from './admin.controller';
@@ -22,6 +23,7 @@ import { PlatformAdminGuard } from './platform-admin.guard';
   imports: [
     ThrottlerModule.forRoot([{ name: 'publicAuth', ttl: 60000, limit: 60 }]),
     SubscriptionsDomainModule,
+    EmailModule,
     MongooseModule.forFeature([
       { name: 'platformAdmin', schema: platformAdminSchema },
       { name: 'adminAudit', schema: adminAuditSchema },

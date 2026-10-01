@@ -1,6 +1,7 @@
 // A fixed upstream and explicit route allowlist prevent this from becoming an open proxy.
 const routes = [
   ["POST", /^admin\/auth\/login$/],
+  ["POST", /^admin\/auth\/(forgot-password|reset-password)$/],
   ["GET", /^admin\/(dashboard|companies|users|files|audit-logs)$/],
   ["GET", /^admin\/companies\/[a-f\d]{24}$/i],
   ["POST", /^admin\/companies\/[a-f\d]{24}\/(suspend|reactivate)$/i],

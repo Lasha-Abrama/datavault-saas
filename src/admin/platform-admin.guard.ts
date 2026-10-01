@@ -39,13 +39,19 @@ export class PlatformAdminGuard implements CanActivate {
         'Platform administrator authentication required',
       );
     try {
-      const payload = await this.jwt.verifyAsync<{ sub: string; type: string }>(
-        match[1],
-      );
+      const payload = await this.jwt.verifyAsync<{
+        sub: string;
+        type: string;
+        version?: number;
+      }>(match[1]);
       if (payload.type !== PLATFORM_ADMIN_TOKEN_TYPE || !isMongoId(payload.sub))
         throw new Error();
       const admin = await this.admins.findById(payload.sub);
-      if (!admin?.isActive) throw new Error();
+      if (
+        !admin?.isActive ||
+        (payload.version ?? 0) !== (admin.authVersion ?? 0)
+      )
+        throw new Error();
       request.platformAdmin = { id: admin._id.toString() };
       return true;
     } catch {
