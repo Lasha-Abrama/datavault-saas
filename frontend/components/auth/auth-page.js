@@ -342,7 +342,7 @@ export default function AuthPage({ mode }) {
                         <Field
                           label="Company name"
                           name="companyName"
-                          placeholder="Acme Studio"
+                          placeholder="SpaceX"
                           minLength={2}
                           maxLength={100}
                           required
@@ -352,7 +352,7 @@ export default function AuthPage({ mode }) {
                           <Field
                             label="Your name"
                             name="fullName"
-                            placeholder="Alex Morgan"
+                            placeholder="Elon Musk"
                             maxLength={100}
                             required
                             autoComplete="name"
@@ -429,7 +429,7 @@ export default function AuthPage({ mode }) {
                       <Field
                         label="Industry"
                         name="industry"
-                        placeholder="Technology"
+                        placeholder="Aerospace"
                         minLength={2}
                         maxLength={100}
                         required
@@ -476,7 +476,31 @@ export default function AuthPage({ mode }) {
               <div className="oauth-choice">
                 <span className="oauth-divider">or</span>
                 <a className="button secondary full" href={googleUrl}>
-                  Continue with Google <ArrowUpRight size={16} />
+                  <svg
+                    aria-hidden="true"
+                    focusable="false"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      fill="#4285F4"
+                      d="M21.6 12.23c0-.71-.06-1.42-.19-2.1H12v3.98h5.38a4.6 4.6 0 0 1-1.99 3.02v2.58h3.22c1.88-1.73 2.99-4.29 2.99-7.48Z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 22c2.7 0 4.97-.9 6.62-2.29l-3.22-2.58c-.9.61-2.04.97-3.4.97-2.61 0-4.82-1.77-5.61-4.16H3.07v2.65A10 10 0 0 0 12 22Z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M6.39 13.94a6 6 0 0 1 0-3.88V7.41H3.07a10 10 0 0 0 0 9.18l3.32-2.65Z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.9c1.43 0 2.7.49 3.71 1.46l2.78-2.78A9.96 9.96 0 0 0 12 2a10 10 0 0 0-8.93 5.41l3.32 2.65C7.18 7.67 9.39 5.9 12 5.9Z"
+                    />
+                  </svg>
+                  Continue with Google
                 </a>
                 <p className="muted small">
                   {mode === "register"

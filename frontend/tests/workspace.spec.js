@@ -968,11 +968,15 @@ test("AI conversations persist, continue and delete through documented endpoints
     });
   });
   await page.goto("/dashboard/assistant");
-  await page.getByLabel("Message the assistant").fill("What is our plan?");
+  const composer = page.getByLabel("Message the assistant");
+  await composer.fill("What is our plan?");
+  await composer.press("Shift+Enter");
+  await expect(composer).toHaveValue("What is our plan?\n");
+  await composer.press("Backspace");
   const first = page.waitForRequest(
     (r) => r.url().endsWith("/ai/chat") && r.method() === "POST",
   );
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await composer.press("Enter");
   expect((await first).postDataJSON()).toEqual({
     message: "What is our plan?",
   });

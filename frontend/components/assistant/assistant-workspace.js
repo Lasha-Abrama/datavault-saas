@@ -322,9 +322,19 @@ export default function AssistantWorkspace({ floating = false }) {
                 disabled={busy || disabled}
                 placeholder="Ask about your workspace, or bring a new idea…"
                 onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
+                    e.preventDefault();
+                    if (!e.repeat) e.currentTarget.form?.requestSubmit();
+                  }
+                }}
               />
               <div className="composer-footer">
-                <span>Read-only assistance · Responses may need review</span>
+                <span>Enter to send · Shift+Enter for a new line</span>
                 <Button
                   busy={busy}
                   disabled={
