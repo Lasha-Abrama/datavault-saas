@@ -551,6 +551,7 @@ export async function adminFixture() {
     tenantJwt,
     subscriptionsService,
     {} as never,
+    {} as never,
   );
   return {
     ...registry,

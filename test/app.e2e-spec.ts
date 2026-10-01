@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ServiceUnavailableException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
@@ -10,6 +10,7 @@ import { AppModule } from '../src/app.module';
 import { Role } from '../src/enums/roles.enum';
 import { PlanCode } from '../src/plans/plan.constants';
 import { EmailSender } from '../src/email/email-sender';
+import { GoogleOauthGuard } from '../src/guards/google-oauth.guard';
 
 describe('multi-tenant HTTP boundary (e2e)', () => {
   let app: INestApplication<App>;
@@ -141,6 +142,14 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .useValue({})
       .overrideProvider(getModelToken('googleOAuthExchange'))
       .useValue({})
+      .overrideGuard(GoogleOauthGuard)
+      .useValue({
+        canActivate: () => {
+          throw new ServiceUnavailableException(
+            'Google authentication is not configured',
+          );
+        },
+      })
       .overrideProvider(EmailSender)
       .useValue({ send: jest.fn() })
       .overrideProvider(getModelToken('plan'))

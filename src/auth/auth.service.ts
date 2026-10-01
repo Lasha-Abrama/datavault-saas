@@ -22,6 +22,8 @@ import { Role } from '../enums/roles.enum';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CompanyVerificationService } from './company-verification.service';
 import { CompanyPlatformStatus } from '../companies/platform-status';
+import { GoogleRegistrationDto } from './dto/google-registration.dto';
+import { GoogleOAuthFlowService } from './google-oauth-flow.service';
 
 @Injectable()
 export class AuthService {
@@ -32,6 +34,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly subscriptionsService: SubscriptionsService,
     private readonly companyVerificationService: CompanyVerificationService,
+    private readonly googleOAuthFlow: GoogleOAuthFlowService,
   ) {}
 
   async signIn({ email, password }: SignInDto) {
@@ -47,15 +50,65 @@ export class AuthService {
   }
 
   async resolveGoogleUser(profile: GoogleUser) {
-    const user = await this.userModel.findOne({ email: profile.email });
+    const user = await this.findGoogleUser(profile);
     if (!user)
       throw new UnauthorizedException(
         'No account is registered for this Google identity',
       );
+    return user;
+  }
+
+  async findGoogleUser(profile: GoogleUser) {
+    const user = await this.userModel.findOne({ email: profile.email });
+    if (!user) return null;
     await this.assertTenantAccess(user);
     user.avatar = profile.avatar;
     await user.save();
     return user;
+  }
+
+  async signUpWithGoogle({
+    code,
+    companyName,
+    country,
+    industry,
+  }: GoogleRegistrationDto) {
+    try {
+      const owner = await this.connection.transaction(async (session) => {
+        const profile = await this.googleOAuthFlow.consumeRegistrationExchange(
+          code,
+          session,
+        );
+        const [company] = await this.companyModel.create(
+          [{ name: companyName, country, industry, activatedAt: new Date() }],
+          { session },
+        );
+        const [user] = await this.userModel.create(
+          [
+            {
+              email: profile.email,
+              fullName: profile.fullName,
+              avatar: profile.avatar,
+              companyId: company._id,
+              role: Role.COMPANY_OWNER,
+            },
+          ],
+          { session },
+        );
+        await this.subscriptionsService.initializeFree(company._id, session);
+        return user;
+      });
+      return { accessToken: await this.signToken(owner) };
+    } catch (error) {
+      if (isDuplicateKeyError(error)) {
+        if (duplicateKeyField(error) === 'email')
+          throw new ConflictException('Email is already in use');
+        if (duplicateKeyField(error) === 'name')
+          throw new ConflictException('Company name is already in use');
+        throw new ConflictException('Company or user already exists');
+      }
+      throw error;
+    }
   }
 
   async exchangeGoogleUser(userId: Types.ObjectId) {

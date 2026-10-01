@@ -5,7 +5,7 @@ const oauthCode = "o".repeat(43);
 const oauthToken = "oauth-test-only-session";
 const exchangePath = "http://localhost:3000/backend/auth/google/exchange";
 
-test("OAuth uses a document navigation and stays sign-in only", async ({
+test("OAuth uses document navigation on sign-in and registration", async ({
   page,
 }) => {
   await page.goto("/login");
@@ -30,7 +30,10 @@ test("OAuth uses a document navigation and stays sign-in only", async ({
     page.getByRole("heading", { name: "OAuth navigation fixture" }),
   ).toBeVisible();
   await page.goto("/register");
-  await expect(google).toHaveCount(0);
+  await expect(google).toHaveAttribute(
+    "href",
+    "https://datavault-saas.onrender.com/auth/google",
+  );
 });
 
 for (const role of ["owner", "member"]) {

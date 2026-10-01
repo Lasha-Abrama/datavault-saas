@@ -101,7 +101,7 @@ describe('OpenAPI document', () => {
       0,
     );
 
-    expect(operationCount).toBe(53);
+    expect(operationCount).toBe(54);
     expect(document.info).toMatchObject({
       title: 'DataVault SaaS API',
       version: '1.0',
@@ -128,6 +128,15 @@ describe('OpenAPI document', () => {
     expect(JSON.stringify(exchange)).not.toContain('stateHash');
     expect(JSON.stringify(exchange)).not.toContain('codeHash');
     expect(exchange.responses?.['200']).toBeDefined();
+  });
+
+  it('documents one-use Google registration separately from sign-in', () => {
+    const registration = requireOperation(
+      requirePath(document, '/auth/google/register'),
+      'post',
+    );
+    expect(registration.security).toBeUndefined();
+    expect(registration.responses?.['200']).toBeDefined();
   });
 
   it('documents actual success statuses and bounded query controls', () => {

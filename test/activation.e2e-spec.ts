@@ -668,9 +668,16 @@ describe('company registration and activation (e2e)', () => {
     await verify(lastToken()).expect(200);
   });
 
-  it('never lets Google OAuth bypass company activation', async () => {
+  it('keeps inactive accounts out of Google sign-in', async () => {
     await register().expect(202);
-    await request(app.getHttpServer()).get('/auth/google/callback').expect(401);
+    await request(app.getHttpServer())
+      .get('/auth/google/callback')
+      .expect(302)
+      .expect(({ headers }: { headers: Record<string, string> }) => {
+        const redirect = new URL(headers.location);
+        expect(redirect.searchParams.get('error')).toBe('account_unavailable');
+        expect(redirect.hash).toBe('');
+      });
     await verify(lastToken()).expect(200);
     await request(app.getHttpServer())
       .get('/auth/google/callback')

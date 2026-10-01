@@ -27,6 +27,7 @@ export default function FloatingAssistant() {
   useEffect(() => {
     if (open) panel.current?.focus();
   }, [open]);
+  if (pathname.startsWith("/admin")) return null;
   return (
     <div className="floating-assistant">
       <section

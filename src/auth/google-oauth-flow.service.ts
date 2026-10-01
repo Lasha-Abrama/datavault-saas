@@ -1,9 +1,10 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { createHash, randomBytes } from 'node:crypto';
-import { Model, Types } from 'mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import { GoogleOAuthState } from './entities/google-oauth-state.entity';
 import { GoogleOAuthExchange } from './entities/google-oauth-exchange.entity';
+import { GoogleUser } from './auth.types';
 
 export const GOOGLE_STATE_TTL_MS = 5 * 60 * 1000;
 export const GOOGLE_EXCHANGE_TTL_MS = 60 * 1000;
@@ -62,9 +63,46 @@ export class GoogleOAuthFlowService {
       purpose: 'google_login_exchange',
       expiresAt: { $gt: now },
     });
-    if (!exchange)
+    if (!exchange?.userId)
       throw new UnauthorizedException('Invalid Google sign-in code');
     return exchange.userId;
+  }
+
+  async createRegistrationExchange(profile: GoogleUser, now = new Date()) {
+    const code = this.randomToken();
+    await this.exchangeModel.create({
+      codeHash: this.hash(code),
+      purpose: 'google_registration_exchange',
+      email: profile.email,
+      fullName: profile.fullName,
+      avatar: profile.avatar,
+      expiresAt: new Date(now.getTime() + GOOGLE_STATE_TTL_MS),
+    });
+    return code;
+  }
+
+  async consumeRegistrationExchange(
+    code: string,
+    session: ClientSession,
+    now = new Date(),
+  ) {
+    if (!this.isOpaque(code))
+      throw new UnauthorizedException('Invalid Google registration code');
+    const exchange = await this.exchangeModel.findOneAndDelete(
+      {
+        codeHash: this.hash(code),
+        purpose: 'google_registration_exchange',
+        expiresAt: { $gt: now },
+      },
+      { session },
+    );
+    if (!exchange?.email)
+      throw new UnauthorizedException('Invalid Google registration code');
+    return {
+      email: exchange.email,
+      fullName: exchange.fullName ?? '',
+      avatar: exchange.avatar,
+    };
   }
 
   private randomToken() {

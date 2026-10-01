@@ -104,6 +104,9 @@ export function AuthProvider({ children }) {
   function exchangeGoogle(code) {
     return authenticate("/auth/google/exchange", { code });
   }
+  function registerWithGoogle(body) {
+    return authenticate("/auth/google/register", body);
+  }
   function logout() {
     revision.current++;
     signingIn.current = false;
@@ -122,6 +125,7 @@ export function AuthProvider({ children }) {
         restore,
         login,
         exchangeGoogle,
+        registerWithGoogle,
         logout,
         isAdmin: user?.role === "company_owner",
       }}

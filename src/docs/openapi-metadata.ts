@@ -35,6 +35,7 @@ import { SignInDto } from '../auth/dto/sign-in.dto';
 import { SignUpDto } from '../auth/dto/sign-up.dto';
 import { VerifyAccountDto } from '../auth/dto/verify-account.dto';
 import { GoogleExchangeDto } from '../auth/dto/google-exchange.dto';
+import { GoogleRegistrationDto } from '../auth/dto/google-registration.dto';
 import { CompaniesController } from '../companies/companies.controller';
 import { CompanyFileVisibility } from '../files/entities/company-file.entity';
 import { FilesController } from '../files/files.controller';
@@ -129,7 +130,9 @@ export function applyOpenApiMetadata() {
   decorateMethod(
     AuthController,
     'googleAuth',
-    ApiOperation({ summary: 'Start browser-bound Google OAuth sign-in' }),
+    ApiOperation({
+      summary: 'Start browser-bound Google OAuth sign-in or signup',
+    }),
     ApiFoundResponse({
       description:
         'Sets a short-lived HttpOnly state cookie and redirects to Google. The frontend should navigate the browser to this endpoint.',
@@ -144,7 +147,7 @@ export function applyOpenApiMetadata() {
     }),
     ApiFoundResponse({
       description:
-        'After single-use state validation, redirects to the configured frontend sign-in route with a short-lived opaque code in the URL fragment, never a JWT. Provider denial redirects with a generic error.',
+        'After single-use state validation, redirects existing users to sign-in or new users to registration with a short-lived opaque code in the URL fragment, never a JWT.',
     }),
     ApiServiceUnavailableResponse(error('Google OAuth is not configured.')),
     ApiUnauthorizedResponse(
@@ -172,6 +175,20 @@ export function applyOpenApiMetadata() {
     ApiForbiddenResponse(error('HTTPS is required in production.')),
     ApiServiceUnavailableResponse(error('Google OAuth is not configured.')),
     ApiTooManyRequestsResponse(error('Too many Google sign-in exchanges.')),
+  );
+  decorateMethod(
+    AuthController,
+    'googleRegister',
+    ApiOperation({ summary: 'Finish Google signup with company details' }),
+    ApiBody({ type: GoogleRegistrationDto }),
+    ApiOkResponse({ schema: apiSchemas.accessToken }),
+    ApiBadRequestResponse(error('Company details or code failed validation.')),
+    ApiUnauthorizedResponse(
+      error('Google registration code expired or was used.'),
+    ),
+    ApiConflictResponse(error('The email or company name is unavailable.')),
+    ApiForbiddenResponse(error('HTTPS is required in production.')),
+    ApiTooManyRequestsResponse(error('Too many registration attempts.')),
   );
   decorateMethod(
     AuthController,

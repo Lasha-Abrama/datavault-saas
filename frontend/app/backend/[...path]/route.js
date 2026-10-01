@@ -1,5 +1,9 @@
 // A fixed upstream and explicit route allowlist prevent this from becoming an open proxy.
 const routes = [
+  ["POST", /^admin\/auth\/login$/],
+  ["GET", /^admin\/(dashboard|companies|users|files|audit-logs)$/],
+  ["GET", /^admin\/companies\/[a-f\d]{24}$/i],
+  ["POST", /^admin\/companies\/[a-f\d]{24}\/(suspend|reactivate)$/i],
   ["GET", /^payments\/current$/],
   ["POST", /^payments\/(checkout|portal|plan|cancel|reconcile)$/],
   ["POST", /^ai\/chat$/],
@@ -9,7 +13,7 @@ const routes = [
   ["GET", /^auth\/current-user$/],
   [
     "POST",
-    /^auth\/(sign-in|sign-up|verify-account|resend-verification|google\/exchange)$/,
+    /^auth\/(sign-in|sign-up|verify-account|resend-verification|google\/(exchange|register))$/,
   ],
   [
     "GET",

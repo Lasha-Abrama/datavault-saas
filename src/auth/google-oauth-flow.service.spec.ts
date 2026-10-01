@@ -13,7 +13,13 @@ describe('GoogleOAuthFlowService', () => {
   const states = new Map<string, { browserHash: string; expiresAt: Date }>();
   const exchanges = new Map<
     string,
-    { userId: Types.ObjectId; purpose: string; expiresAt: Date }
+    {
+      userId?: Types.ObjectId;
+      email?: string;
+      fullName?: string;
+      purpose: string;
+      expiresAt: Date;
+    }
   >();
   const stateModel = {
     create: jest.fn(
@@ -44,7 +50,9 @@ describe('GoogleOAuthFlowService', () => {
     create: jest.fn(
       (row: {
         codeHash: string;
-        userId: Types.ObjectId;
+        userId?: Types.ObjectId;
+        email?: string;
+        fullName?: string;
         purpose: string;
         expiresAt: Date;
       }) => {
@@ -156,6 +164,31 @@ describe('GoogleOAuthFlowService', () => {
         code,
         new Date(now.getTime() + GOOGLE_EXCHANGE_TTL_MS),
       ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('uses a separate, one-use Google registration code', async () => {
+    const profile = { email: 'new@example.com', fullName: 'New Owner' };
+    const code = await flow.createRegistrationExchange(profile, now);
+    expect(exchangeModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codeHash: hash(code),
+        purpose: 'google_registration_exchange',
+        email: profile.email,
+        expiresAt: new Date(now.getTime() + GOOGLE_STATE_TTL_MS),
+      }),
+    );
+    await expect(flow.consumeExchange(code, now)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    await expect(
+      flow.consumeRegistrationExchange(code, {} as never, now),
+    ).resolves.toEqual({
+      ...profile,
+      avatar: undefined,
+    });
+    await expect(
+      flow.consumeRegistrationExchange(code, {} as never, now),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 

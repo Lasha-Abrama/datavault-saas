@@ -10,6 +10,7 @@ import {
   HttpStatus,
   ServiceUnavailableException,
   ForbiddenException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
@@ -27,6 +28,7 @@ import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { CompanyVerificationService } from './company-verification.service';
 import { GoogleOAuthFlowService } from './google-oauth-flow.service';
 import { GoogleExchangeDto } from './dto/google-exchange.dto';
+import { GoogleRegistrationDto } from './dto/google-registration.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -58,10 +60,27 @@ export class AuthController {
     if (req.query.error)
       redirect.searchParams.set('error', 'google_auth_cancelled');
     else {
-      const user = await this.authService.resolveGoogleUser(req.user);
-      redirect.hash = new URLSearchParams({
-        code: await this.googleOAuthFlow.createExchange(user._id),
-      }).toString();
+      let user;
+      try {
+        user = await this.authService.findGoogleUser(req.user);
+      } catch (error) {
+        if (!(error instanceof UnauthorizedException)) throw error;
+        redirect.searchParams.set('error', 'account_unavailable');
+        res.redirect(redirect.toString());
+        return;
+      }
+      if (user) {
+        redirect.hash = new URLSearchParams({
+          code: await this.googleOAuthFlow.createExchange(user._id),
+        }).toString();
+      } else {
+        redirect.pathname = '/register';
+        redirect.hash = new URLSearchParams({
+          google_code: await this.googleOAuthFlow.createRegistrationExchange(
+            req.user,
+          ),
+        }).toString();
+      }
     }
     res.redirect(redirect.toString());
   }
@@ -84,6 +103,25 @@ export class AuthController {
     res.setHeader('Cache-Control', 'private, no-store');
     const userId = await this.googleOAuthFlow.consumeExchange(dto.code);
     return this.authService.exchangeGoogleUser(userId);
+  }
+
+  @Post('google/register')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ publicAuth: { limit: 5, ttl: 60_000 } })
+  async googleRegister(
+    @Body() dto: GoogleRegistrationDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (!this.config.get<string>('GOOGLE_CLIENT_ID'))
+      throw new ServiceUnavailableException(
+        'Google authentication is not configured',
+      );
+    if (this.config.get<string>('NODE_ENV') === 'production' && !req.secure)
+      throw new ForbiddenException('HTTPS is required for Google registration');
+    res.setHeader('Cache-Control', 'private, no-store');
+    return this.authService.signUpWithGoogle(dto);
   }
 
   @Post('sign-in')

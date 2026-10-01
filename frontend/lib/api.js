@@ -119,6 +119,12 @@ export class ApiError extends Error {
         this.message =
           "We couldn’t connect to DataVault. Check your connection, then start Google sign-in again.";
     }
+    if (
+      context === "/auth/google/register" &&
+      (status === 400 || status === 401)
+    )
+      this.message =
+        "Your Google registration link has expired. Start again with Google.";
     this.fields = {};
     if (status === 400 && Array.isArray(body?.message)) {
       for (const item of body.message) {
@@ -140,6 +146,19 @@ export class ApiError extends Error {
     )
       this.message =
         "Your registration was saved, but the activation email could not be sent. Use “Resend activation” instead of registering again.";
+    if (
+      status === 409 &&
+      ["/auth/sign-up", "/auth/google/register"].includes(context)
+    ) {
+      this.code =
+        body?.message === "Email is already in use"
+          ? "account_exists"
+          : "company_exists";
+      this.message =
+        this.code === "account_exists"
+          ? "An account already uses this email. Sign in or request a new activation email."
+          : "That company name is already in use. Try another name.";
+    }
     if (
       status === 503 &&
       context === "/invitations" &&

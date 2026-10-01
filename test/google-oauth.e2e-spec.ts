@@ -24,6 +24,11 @@ describe('Google OAuth browser binding (e2e, no provider call)', () => {
     createExchange: jest.fn(),
     consumeExchange: jest.fn(),
   };
+  const auth = {
+    signUpWithGoogle: jest
+      .fn()
+      .mockResolvedValue({ accessToken: 'tenant-token' }),
+  };
   const config = new ConfigService({
     GOOGLE_CLIENT_ID: 'test-client-id',
     GOOGLE_CLIENT_SECRET: 'test-client-secret',
@@ -48,7 +53,7 @@ describe('Google OAuth browser binding (e2e, no provider call)', () => {
           useFactory: () => new GoogleStrategy(config),
         },
         { provide: ConfigService, useValue: config },
-        { provide: AuthService, useValue: {} },
+        { provide: AuthService, useValue: auth },
         { provide: CompanyVerificationService, useValue: {} },
         { provide: GoogleOAuthFlowService, useValue: flow },
       ],
@@ -109,5 +114,33 @@ describe('Google OAuth browser binding (e2e, no provider call)', () => {
     expect(redirect.searchParams.get('error')).toBe('google_auth_cancelled');
     expect(redirect.toString()).not.toContain('private details');
     expect(redirect.toString()).not.toContain('evil.test');
+  });
+
+  it('accepts validated company details for Google registration', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/google/register')
+      .send({
+        code: 'C'.repeat(43),
+        companyName: 'Acme',
+        country: 'GE',
+        industry: 'Technology',
+      })
+      .expect(200)
+      .expect({ accessToken: 'tenant-token' });
+    expect(auth.signUpWithGoogle).toHaveBeenCalledWith({
+      code: 'C'.repeat(43),
+      companyName: 'Acme',
+      country: 'GE',
+      industry: 'Technology',
+    });
+    await request(app.getHttpServer())
+      .post('/auth/google/register')
+      .send({
+        code: 'invalid',
+        companyName: 'A',
+        country: 'GE',
+        industry: 'Technology',
+      })
+      .expect(400);
   });
 });

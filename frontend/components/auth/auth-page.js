@@ -2,7 +2,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ArrowUpRight, ShieldCheck } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  ShieldCheck,
+  CircleHelp,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { googleSignInUrl, request } from "@/lib/api";
 import { Alert, Button, Field, Logo, Loading } from "@/components/ui";
@@ -30,7 +35,8 @@ const titles = {
   "reset-password": ["Reset your password.", "Account recovery"],
 };
 export default function AuthPage({ mode }) {
-  const { user, loading, login, exchangeGoogle } = useAuth(),
+  const { user, loading, login, exchangeGoogle, registerWithGoogle } =
+      useAuth(),
     router = useRouter();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(null),
@@ -39,12 +45,15 @@ export default function AuthPage({ mode }) {
     [token, setToken] = useState(""),
     [tokenReady, setTokenReady] = useState(false),
     [email, setEmail] = useState(""),
+    [googleCode, setGoogleCode] = useState(""),
     [oauthStatus, setOauthStatus] = useState(
       mode === "login" ? "checking" : "idle",
     );
   const captured = useRef(false);
   const oauthCaptured = useRef(false);
-  const googleUrl = mode === "login" ? googleSignInUrl() : null;
+  const googleUrl = ["login", "register"].includes(mode)
+    ? googleSignInUrl()
+    : null;
   useEffect(() => {
     if (
       !loading &&
@@ -60,8 +69,8 @@ export default function AuthPage({ mode }) {
     const url = new URL(window.location.href);
     const fragment = new URLSearchParams(url.hash.slice(1));
     const code = fragment.get("code");
-    const providerError = url.searchParams.get("error");
-    if (code !== null || providerError !== null) {
+    const denied = url.searchParams.get("error");
+    if (code !== null || denied !== null) {
       url.searchParams.delete("error");
       window.history.replaceState(
         window.history.state,
@@ -69,12 +78,14 @@ export default function AuthPage({ mode }) {
         url.pathname + url.search,
       );
     }
-    if (providerError !== null) {
+    if (denied !== null) {
       setError(
         new Error(
-          providerError === "google_auth_cancelled"
-            ? "Google sign-in was cancelled. You can try again below."
-            : "Google sign-in could not be completed. Please try again.",
+          denied === "account_unavailable"
+            ? "This account is not active. Try signing in or request a new activation email."
+            : denied === "google_auth_cancelled"
+              ? "Google sign-in was cancelled. You can try again below."
+              : "Google sign-in could not be completed. Please try again.",
         ),
       );
       setOauthStatus("idle");
@@ -103,6 +114,29 @@ export default function AuthPage({ mode }) {
       .finally(() => setOauthStatus("idle"));
   }, [mode, exchangeGoogle, router]);
   useEffect(() => {
+    if (mode !== "register") return;
+    const url = new URL(window.location.href);
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    const code = fragment.get("google_code");
+    if (!code) return;
+    window.history.replaceState(
+      window.history.state,
+      "",
+      url.pathname + url.search,
+    );
+    if (
+      fragment.getAll("google_code").length === 1 &&
+      /^[A-Za-z0-9_-]{43}$/.test(code)
+    )
+      setGoogleCode(code);
+    else
+      setError(
+        new Error(
+          "This Google registration link is invalid. Try Google again.",
+        ),
+      );
+  }, [mode]);
+  useEffect(() => {
     if (captured.current) return;
     captured.current = true;
     const url = new URL(window.location.href);
@@ -124,15 +158,26 @@ export default function AuthPage({ mode }) {
         router.replace(loginDestination());
       }
       if (mode === "register") {
-        await request("/auth/sign-up", {
-          method: "POST",
-          body: values,
-          public: true,
-        });
-        setEmail(values.email);
-        setSuccess(
-          "Your workspace has been created. Check your inbox for an activation link, valid for 24 hours. Activate your account before signing in.",
-        );
+        if (googleCode) {
+          await registerWithGoogle({
+            code: googleCode,
+            companyName: values.companyName,
+            country: values.country,
+            industry: values.industry,
+          });
+          setGoogleCode("");
+          router.replace("/dashboard");
+        } else {
+          await request("/auth/sign-up", {
+            method: "POST",
+            body: values,
+            public: true,
+          });
+          setEmail(values.email);
+          setSuccess(
+            "Your workspace has been created. Check your inbox for an activation link, valid for 24 hours. Activate your account before signing in.",
+          );
+        }
       }
       if (mode === "activate") {
         await request("/auth/verify-account", {
@@ -227,9 +272,30 @@ export default function AuthPage({ mode }) {
           </span>
           <h2>{titles[mode][0]}</h2>
           <p className="auth-subtitle">{titles[mode][1]}</p>
-          <Alert>{error?.message}</Alert>
+          <Alert>
+            {error?.code === "account_exists" ? null : error?.message}
+          </Alert>
           <Alert type="success">{resendNotice}</Alert>
-          {success ? (
+          {error?.code === "account_exists" ? (
+            <div className="success-panel account-state" role="alert">
+              <CircleHelp size={32} />
+              <h3>This account already exists</h3>
+              <p>
+                Use your existing account to get back to your workspace. If you
+                have not activated it yet, request a new link below.
+              </p>
+              <Link className="button" href="/login">
+                Sign in <ArrowRight size={16} />
+              </Link>
+              <button
+                className="text-link"
+                type="button"
+                onClick={() => setError(null)}
+              >
+                Try another email
+              </button>
+            </div>
+          ) : success ? (
             <div className="success-panel">
               <ShieldCheck size={32} />
               <h3>
@@ -282,19 +348,22 @@ export default function AuthPage({ mode }) {
                           required
                           error={error?.fields?.companyName}
                         />
-                        <Field
-                          label="Your name"
-                          name="fullName"
-                          placeholder="Alex Morgan"
-                          maxLength={100}
-                          required
-                          autoComplete="name"
-                          error={error?.fields?.fullName}
-                        />
+                        {!googleCode && (
+                          <Field
+                            label="Your name"
+                            name="fullName"
+                            placeholder="Alex Morgan"
+                            maxLength={100}
+                            required
+                            autoComplete="name"
+                            error={error?.fields?.fullName}
+                          />
+                        )}
                       </div>
                     </>
                   )}
-                  {["login", "register"].includes(mode) && (
+                  {(mode === "login" ||
+                    (mode === "register" && !googleCode)) && (
                     <Field
                       label="Work email"
                       name="email"
@@ -323,23 +392,24 @@ export default function AuthPage({ mode }) {
                       />
                     </>
                   )}
-                  {mode !== "activate" && (
-                    <Field
-                      label={
-                        mode === "login" ? "Password" : "Create a password"
-                      }
-                      name="password"
-                      type="password"
-                      required
-                      minLength={6}
-                      maxLength={20}
-                      autoComplete={
-                        mode === "login" ? "current-password" : "new-password"
-                      }
-                      hint={mode !== "login" ? "6–20 characters" : undefined}
-                      error={error?.fields?.password}
-                    />
-                  )}
+                  {mode !== "activate" &&
+                    !(mode === "register" && googleCode) && (
+                      <Field
+                        label={
+                          mode === "login" ? "Password" : "Create a password"
+                        }
+                        name="password"
+                        type="password"
+                        required
+                        minLength={6}
+                        maxLength={20}
+                        autoComplete={
+                          mode === "login" ? "current-password" : "new-password"
+                        }
+                        hint={mode !== "login" ? "6–20 characters" : undefined}
+                        error={error?.fields?.password}
+                      />
+                    )}
                   {mode === "register" && (
                     <div className="form-grid">
                       <Field
@@ -380,7 +450,9 @@ export default function AuthPage({ mode }) {
                     {mode === "login"
                       ? "Sign in to your workspace"
                       : mode === "register"
-                        ? "Create your workspace"
+                        ? googleCode
+                          ? "Create workspace with Google"
+                          : "Create your workspace"
                         : mode === "activate"
                           ? "Activate account"
                           : "Join your workspace"}
@@ -396,24 +468,20 @@ export default function AuthPage({ mode }) {
               )}
             </form>
           )}
-          {mode === "login" &&
+          {["login", "register"].includes(mode) &&
             googleUrl &&
             !loading &&
+            !googleCode &&
             oauthStatus === "idle" && (
               <div className="oauth-choice">
                 <span className="oauth-divider">or</span>
-                <a
-                  className="button secondary full"
-                  href={googleUrl}
-                  aria-disabled={busy || undefined}
-                  onClick={(event) => {
-                    if (busy) event.preventDefault();
-                  }}
-                >
+                <a className="button secondary full" href={googleUrl}>
                   Continue with Google <ArrowUpRight size={16} />
                 </a>
                 <p className="muted small">
-                  Google sign-in is for existing, activated DataVault accounts.
+                  {mode === "register"
+                    ? "Verify your email with Google, then enter your company details here."
+                    : "New here? Google will guide you through workspace setup."}
                 </p>
               </div>
             )}
@@ -443,6 +511,11 @@ export default function AuthPage({ mode }) {
             <ShieldCheck size={15} />
             <span>Your company’s data deserves a dedicated home.</span>
           </div>
+          {mode === "login" && (
+            <Link className="text-link" href="/admin">
+              Platform admin sign in
+            </Link>
+          )}
         </div>
         <footer className="auth-bottom">
           <span>© {new Date().getFullYear()} DataVault</span>

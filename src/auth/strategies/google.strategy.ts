@@ -31,7 +31,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       throw new UnauthorizedException('Google did not supply a verified email');
     return {
       email: email.toLowerCase(),
-      fullName: profile.displayName,
+      fullName: profile.displayName.trim().slice(0, 100),
       avatar: profile.picture,
     };
   }

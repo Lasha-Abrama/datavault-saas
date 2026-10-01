@@ -39,6 +39,9 @@ describe('AuthService company onboarding', () => {
     createForRegistration: jest.fn(),
     sendActivationEmail: jest.fn(),
   };
+  const googleOAuthFlow = {
+    consumeRegistrationExchange: jest.fn(),
+  };
   const service = new AuthService(
     userModel as never,
     companyModel as never,
@@ -46,6 +49,7 @@ describe('AuthService company onboarding', () => {
     jwt as never,
     subscriptions as never,
     verification as never,
+    googleOAuthFlow as never,
   );
 
   beforeEach(() => {
@@ -61,6 +65,10 @@ describe('AuthService company onboarding', () => {
     ]);
     verification.createForRegistration.mockResolvedValue(delivery);
     verification.sendActivationEmail.mockResolvedValue(undefined);
+    googleOAuthFlow.consumeRegistrationExchange.mockResolvedValue({
+      email: 'owner@example.com',
+      fullName: 'Owner',
+    });
     companyModel.findOne.mockResolvedValue({
       _id: companyId,
       activatedAt: new Date(),
@@ -98,6 +106,44 @@ describe('AuthService company onboarding', () => {
       verification.sendActivationEmail.mock.invocationCallOrder[0],
     ).toBeGreaterThan(connection.transaction.mock.invocationCallOrder[0]);
     expect(jwt.signAsync).not.toHaveBeenCalled();
+  });
+
+  it('creates an activated Google workspace from a verified profile without a password or email token', async () => {
+    await expect(
+      service.signUpWithGoogle({
+        code: 'opaque',
+        companyName: 'Acme',
+        country: 'GE',
+        industry: 'Technology',
+      }),
+    ).resolves.toEqual({ accessToken: 'token' });
+    expect(googleOAuthFlow.consumeRegistrationExchange).toHaveBeenCalledWith(
+      'opaque',
+      session,
+    );
+    expect(companyModel.create).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          name: 'Acme',
+          activatedAt: expect.any(Date) as Date,
+        }),
+      ],
+      { session },
+    );
+    expect(userModel.create).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          email: 'owner@example.com',
+          role: Role.COMPANY_OWNER,
+        }),
+      ],
+      { session },
+    );
+    const calls = userModel.create.mock.calls as unknown as Array<
+      [Record<string, unknown>[]]
+    >;
+    expect(calls.at(-1)?.[0][0]).not.toHaveProperty('password');
+    expect(verification.sendActivationEmail).not.toHaveBeenCalled();
   });
 
   it.each([
