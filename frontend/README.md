@@ -17,7 +17,7 @@ Open http://localhost:3000. For production: `npm run build`, then `npm start`.
 ## Configuration
 
 - `NEXT_PUBLIC_API_URL=https://datavault-saas.onrender.com` (no `/api` prefix)
-- `NEXT_PUBLIC_STORAGE_ENABLED=false`. Change to `true` only after S3 upload, download, and deletion are verified on the backend; rebuild after changing public environment variables.
+- File controls are available in the vault. The backend remains the authority for upload quotas, permissions, and storage availability; an unavailable storage provider returns a friendly error.
 - Browser requests use the same-origin `/backend` gateway, which forwards allowlisted tenant and platform-admin routes to `NEXT_PUBLIC_API_URL`, without adding any upstream prefix. The gateway forwards Bearer authorization and streams uploads/downloads; it never stores tokens or forwards cookies. Direct browser-to-Render clients still require exact allowed `CORS_ORIGIN` values.
 - Render `ACCOUNT_ACTIVATION_URL` should be `https://<frontend>/activate`.
 - Render `EMPLOYEE_INVITATION_URL` should be `https://<frontend>/employee-activate`.

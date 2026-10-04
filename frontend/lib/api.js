@@ -70,8 +70,7 @@ export class ApiError extends Error {
         body?.message === "Test Mode payments are not configured"
       ) {
         this.code = "payments_disabled";
-        this.message =
-          "Stripe test payments are not enabled on the server yet.";
+        this.message = "Online payments are not enabled yet.";
       } else if (status === 503) {
         this.message =
           "Billing is temporarily unavailable. Refresh the payment status before trying again.";
@@ -86,6 +85,9 @@ export class ApiError extends Error {
           "This billing action is not available for the selected plan. Refresh your subscription and try again.";
       }
     }
+    if (context === "/files" && status === 503)
+      this.message =
+        "File storage is temporarily unavailable. Refresh the file list before trying again.";
     if (context.startsWith("/ai/")) {
       const aiMessages = {
         ai_disabled: "The AI assistant is not enabled on the server yet.",

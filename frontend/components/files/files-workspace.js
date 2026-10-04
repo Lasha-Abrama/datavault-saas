@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Check,
   FileUp,
-  LockKeyhole,
   Search,
   SlidersHorizontal,
   Trash2,
@@ -16,10 +15,9 @@ import {
 import { collection, request, upload } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useResource } from "@/lib/hooks";
-import { bytes, date, filterFiles, storageEnabled } from "@/lib/utils";
+import { bytes, date, filterFiles } from "@/lib/utils";
 import {
   Alert,
-  Badge,
   Button,
   Confirm,
   Empty,
@@ -328,12 +326,10 @@ export function FileDetail({ file, users = [], onClose, onChanged }) {
               />
             )}
             <div className="modal-actions">
-              {storageEnabled && (
-                <Button busy={busy} variant="secondary" onClick={download}>
-                  <ArrowDownToLine size={16} />
-                  Download
-                </Button>
-              )}
+              <Button busy={busy} variant="secondary" onClick={download}>
+                <ArrowDownToLine size={16} />
+                Download
+              </Button>
               {canEdit && (
                 <Button
                   busy={busy}
@@ -348,13 +344,7 @@ export function FileDetail({ file, users = [], onClose, onChanged }) {
                 </Button>
               )}
             </div>
-            {!storageEnabled && (
-              <Alert type="info">
-                File storage is temporarily unavailable. Downloads and deletion
-                will return when storage is connected.
-              </Alert>
-            )}
-            {canEdit && storageEnabled && (
+            {canEdit && (
               <button className="danger-link" onClick={() => setDeleting(true)}>
                 <Trash2 size={15} />
                 Delete file
@@ -561,31 +551,12 @@ export default function FilesPage() {
         title="The file vault"
         description="A single home for the data that keeps your business moving."
         action={
-          storageEnabled ? (
-            <Button onClick={() => setUploading(true)}>
-              <Upload size={17} />
-              Upload file
-            </Button>
-          ) : (
-            <Badge tone="amber">Storage temporarily unavailable</Badge>
-          )
+          <Button onClick={() => setUploading(true)}>
+            <Upload size={17} />
+            Upload file
+          </Button>
         }
       />
-      {!storageEnabled && (
-        <div className="storage-note">
-          <LockKeyhole size={22} />
-          <div>
-            <strong>
-              Your vault is ready. File storage is being connected.
-            </strong>
-            <p>
-              You can browse available files and manage access. Uploads,
-              downloads, and deletion will be available once storage is
-              connected.
-            </p>
-          </div>
-        </div>
-      )}
       <section className="panel">
         <div className="panel-heading">
           <div>
@@ -667,11 +638,9 @@ export default function FilesPage() {
           </Empty>
         ) : (
           <Empty>
-            {storageEnabled && (
-              <Button onClick={() => setUploading(true)}>
-                Upload your first file
-              </Button>
-            )}
+            <Button onClick={() => setUploading(true)}>
+              Upload your first file
+            </Button>
           </Empty>
         )}
         <div className="table-footer">

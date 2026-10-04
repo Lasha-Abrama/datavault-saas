@@ -58,7 +58,7 @@ function OwnerReturn({ kind }) {
       {kind === "success" && payment.data && (
         <Alert type={connected ? "success" : "info"}>
           {connected
-            ? `${planName(payment.data.planCode)} billing is connected in Stripe test mode. This confirms your subscription status, not a payment receipt.`
+            ? `${planName(payment.data.planCode)} billing is connected. This confirms your subscription status, not a payment receipt. No real charges are currently made.`
             : "Setup is not confirmed yet. Stripe may still be updating your subscription. Refresh the status or synchronize once below before starting another Checkout."}
         </Alert>
       )}

@@ -309,6 +309,28 @@ test("billing distinguishes disabled Stripe from an outage", async ({
     page.getByRole("button", { name: "Upgrade to Premium" }),
   ).toBeDisabled();
 });
+test("billing avoids test-mode labels while clearly disclosing that no real charges occur", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route(`${api}/payments/current`, (route) =>
+    route.fulfill({ json: paymentFixture() }),
+  );
+  await page.goto("/dashboard/billing");
+  await expect(
+    page.getByText("No real charges", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      /Stripe (is in )?test mode|test payment method|test Checkout/i,
+    ),
+  ).toHaveCount(0);
+  await page.goto("/payments/success");
+  await expect(
+    page.getByText(/No real charges are currently made/),
+  ).toBeVisible();
+  await expect(page.getByText(/Stripe (is in )?test mode/i)).toHaveCount(0);
+});
 test("paid setup uses Stripe checkout with only the documented plan payload", async ({
   page,
 }) => {
@@ -740,6 +762,75 @@ async function fixture(page, role = "owner", signedIn = true) {
     });
   });
 }
+test("file upload sends the chosen CSV and restricted employee access", async ({
+  page,
+}) => {
+  await fixture(page);
+  let uploadRequest;
+  await page.route(`${api}/files`, (route) => {
+    uploadRequest = route.request();
+    return route.fulfill({ status: 201, json: files[0] });
+  });
+  await page.goto("/dashboard/files");
+  await page
+    .getByRole("button", { name: "Upload file", exact: true })
+    .first()
+    .click();
+  await page.getByLabel("Choose a file").setInputFiles({
+    name: "upload-proof.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("column\nsynthetic\n"),
+  });
+  await page.getByRole("radio", { name: /Selected employees only/ }).check();
+  await page.getByRole("checkbox", { name: /Sam Lee/ }).check();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Upload file" })
+    .click();
+  await expect(page.getByText("File added to your vault")).toBeVisible();
+  expect(uploadRequest.method()).toBe("POST");
+  expect(uploadRequest.headers().authorization).toBe(
+    "Bearer test-only-session",
+  );
+  expect(uploadRequest.headers()["content-type"]).toContain(
+    "multipart/form-data",
+  );
+  const payload = uploadRequest.postData();
+  expect(payload).toContain('filename="upload-proof.csv"');
+  expect(payload).toContain('name="visibility"');
+  expect(payload).toContain("restricted");
+  expect(payload).toContain(JSON.stringify([member._id]));
+});
+
+test("an unavailable storage provider keeps the upload dialog open with a clear retry path", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route(`${api}/files`, (route) =>
+    route.fulfill({
+      status: 503,
+      json: { message: "Private provider detail" },
+    }),
+  );
+  await page.goto("/dashboard/files");
+  await page
+    .getByRole("button", { name: "Upload file", exact: true })
+    .first()
+    .click();
+  await page.getByLabel("Choose a file").setInputFiles({
+    name: "upload-proof.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("column\nsynthetic\n"),
+  });
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Upload file" })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "File storage is temporarily unavailable",
+  );
+  await expect(page.getByText("Private provider detail")).toHaveCount(0);
+});
 test("redesigned directories and forms remain within desktop and mobile viewports", async ({
   page,
 }) => {

@@ -13,7 +13,7 @@ import {
 import { collection, request } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useResource } from "@/lib/hooks";
-import { date, money, storageEnabled } from "@/lib/utils";
+import { date, money } from "@/lib/utils";
 import {
   Badge,
   Empty,
@@ -177,13 +177,7 @@ export default function Overview() {
               onSelect={setSelected}
             />
           ) : (
-            <Empty
-              description={
-                storageEnabled
-                  ? "Upload your first CSV, XLS, or XLSX file to get started."
-                  : "Your files will appear here. Storage is currently being connected."
-              }
-            >
+            <Empty description="Upload your first CSV, XLS, or XLSX file to get started.">
               <Link className="text-link" href="/dashboard/files">
                 Explore your vault <ArrowRight size={15} />
               </Link>

@@ -62,8 +62,8 @@ export default function PaymentPanel({
         <span className="eyebrow">PAYMENTS</span>
         <h2>Stripe isn’t connected yet.</h2>
         <p>
-          Hosted setup, payment methods, and invoices will appear when test
-          payments are enabled. Your usage estimates are still available.
+          Hosted setup, payment methods, and invoices will appear when online
+          payments are available. Your usage estimates are still available.
         </p>
         <Button variant="secondary" onClick={resource.reload}>
           Check availability
@@ -81,7 +81,7 @@ export default function PaymentPanel({
           <span className="eyebrow">PAYMENTS & INVOICES</span>
           <h2>Your payment details.</h2>
         </div>
-        <Badge tone="amber">Stripe test mode · No real charges</Badge>
+        {state.mode === "test" && <Badge tone="amber">No real charges</Badge>}
       </div>
       <dl className="payment-facts">
         <div>
@@ -151,8 +151,8 @@ export default function PaymentPanel({
         </Button>
       </div>
       <p className="small muted">
-        Card details stay in Stripe. Checkout saves a test payment method; it
-        does not collect a payment immediately.
+        Card details stay in Stripe. Checkout saves a payment method; it does
+        not collect a payment immediately.
       </p>
       {showInvoices && (
         <div className="invoice-section">
@@ -169,7 +169,7 @@ export default function PaymentPanel({
             <div className="table-scroll">
               <table className="invoice-table">
                 <caption className="sr-only">
-                  Latest ten Stripe test invoices
+                  Latest ten Stripe invoices
                 </caption>
                 <thead>
                   <tr>

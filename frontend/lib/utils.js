@@ -26,8 +26,6 @@ export const initials = (value = "") =>
     .map((s) => s[0])
     .join("")
     .toUpperCase() || "DV";
-export const storageEnabled =
-  process.env.NEXT_PUBLIC_STORAGE_ENABLED === "true";
 export function filterFiles(
   files,
   { search = "", type = "", visibility = "", sort = "newest" },

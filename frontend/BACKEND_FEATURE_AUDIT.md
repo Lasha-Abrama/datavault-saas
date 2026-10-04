@@ -9,7 +9,7 @@ This compares the local Nest API and the Next.js UI. “Wired” means the scree
 | Employee invitations and acceptance | `/invitations/*` | Employee management and `/employee-activate` | Wired. Email delivery and invitation URL must be configured. |
 | Company, profile, password | `/companies/current`, `/users/*` | Dashboard settings and profile | Own profile and owner company edits wired. Owner editing another employee’s profile via `PATCH /users/:id` has no UI. |
 | Plans and billing | `/plans`, `/subscriptions/*`, `/payments/*` | Plans, billing, Stripe return pages | Wired. Live Stripe flow needs backend test-mode setup and webhook; no card details pass through the frontend. |
-| Files and permissions | `/files/*` | File library | Metadata and permissions wired. Upload, download, and delete are gated by `NEXT_PUBLIC_STORAGE_ENABLED` until S3 is configured. |
+| Files and permissions | `/files/*` | File library | Upload, download, delete, and permissions are wired. The backend is authoritative for storage availability and access; S3 must be configured on Render. |
 | Statistics and AI | `/statistics/current`, `/ai/*` | Dashboard and assistant | Wired. AI requires a configured provider; disabled state is shown in the UI. |
 | Platform administration | `/admin/auth/login`, dashboard, companies, users, files, audit logs, company suspend/reactivate | `/admin` | Wired with a separate platform-admin JWT and session. Bootstrap the first platform admin with `npm run admin:bootstrap`; ordinary company owners do not have platform access. |
 

@@ -59,13 +59,13 @@ export default function Billing() {
         title="Room to grow."
         description="Your plan, your usage, and exactly what it adds up to."
       />
-      <Alert type="info">
-        {stripeReady
-          ? "Stripe is in test mode. No real money is charged. Checkout saves a test payment method; invoices are separate from the internal estimates below."
-          : assignmentMode
-            ? "Stripe test payments are disabled. Plan changes here update your workspace without collecting payment. Amounts below are internal estimates, not invoices."
+      {!stripeReady && (
+        <Alert type="info">
+          {assignmentMode
+            ? "Online payments are not available yet. Plan changes here update your workspace without collecting payment. Amounts below are internal estimates, not invoices."
             : "Amounts below are internal usage estimates, not invoices. Your administrator manages payment methods and plan changes."}
-      </Alert>
+        </Alert>
+      )}
       {billing.loading ? (
         <Loading label="Loading billing details" />
       ) : billing.error ? (
@@ -306,7 +306,7 @@ export default function Billing() {
                 ? `Keep ${chosen.name}?`
                 : `Change to ${chosen.name}?`
           }
-          description={`${chosen.name} includes ${chosen.includedFilesPerMonth.toLocaleString()} files per month. ${chosen.code === "basic" ? "$5 per employee per month." : `${money(chosen.basePriceCents)} monthly base.`} ${assignmentMode ? "This is a workspace plan assignment; no payment is collected." : setup ? "You’ll continue to Stripe test Checkout to save a payment method. Checkout does not collect a payment immediately. Return here to verify your subscription." : chosen.code === b?.plan.code ? "This requests keeping your current plan and clearing its scheduled change." : "Stripe test mode: no real charges. Downgrades take effect at the billing-period boundary; upgrades can take effect earlier. No prorated charge is applied."} Downgrades must fit your employees and pending invitations.`}
+          description={`${chosen.name} includes ${chosen.includedFilesPerMonth.toLocaleString()} files per month. ${chosen.code === "basic" ? "$5 per employee per month." : `${money(chosen.basePriceCents)} monthly base.`} ${assignmentMode ? "This is a workspace plan assignment; no payment is collected." : setup ? "You’ll continue to Stripe Checkout to save a payment method. Checkout does not collect a payment immediately. Return here to verify your subscription." : chosen.code === b?.plan.code ? "This requests keeping your current plan and clearing its scheduled change." : "No real charges are currently made. Downgrades take effect at the billing-period boundary; upgrades can take effect earlier. No prorated charge is applied."} Downgrades must fit your employees and pending invitations.`}
           label={setup ? "Continue to Stripe" : "Confirm plan change"}
           dangerous={false}
           onClose={() => setChosen(null)}
