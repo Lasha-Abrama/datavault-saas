@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Building2,
@@ -10,13 +10,66 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { Button, Field, Loading, Logo } from "@/components/ui";
+import { Button, Confirm, Field, Loading, Logo } from "@/components/ui";
 import "./platform.css";
 
 const key = "datavault.platform.session";
-const tabs = ["Overview", "Companies", "Users", "Files", "Audit logs"];
-const paths = ["dashboard", "companies", "users", "files", "audit-logs"];
+const tabs = [
+  "Overview",
+  "Companies",
+  "Users",
+  "Files",
+  "Audit logs",
+  "Access requests",
+];
+const paths = [
+  "dashboard",
+  "companies",
+  "users",
+  "files",
+  "audit-logs",
+  "access-requests",
+];
 const date = (value) => (value ? new Date(value).toLocaleDateString() : "—");
+const timestamp = (value) =>
+  value
+    ? new Date(value).toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "long",
+      })
+    : "Time unavailable";
+
+async function loadDirectory(path, token, audit) {
+  const result = await api(path, { token });
+  if (!audit) return result;
+  const ids = [
+    ...new Set(
+      result.items
+        .filter((item) => item.targetType === "company" && item.targetId)
+        .map((item) => item.targetId),
+    ),
+  ];
+  const names = Object.fromEntries(
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const detail = await api(`companies/${id}`, { token });
+          return [id, detail.company.name];
+        } catch (error) {
+          if (error.status === 401) throw error;
+          return [id, null];
+        }
+      }),
+    ),
+  );
+  return {
+    ...result,
+    items: result.items.map((item) => ({
+      ...item,
+      companyName: names[item.targetId],
+    })),
+  };
+}
 
 async function api(path, { token, method = "GET", body } = {}) {
   const response = await fetch(`/backend/admin/${path}`, {
@@ -32,7 +85,11 @@ async function api(path, { token, method = "GET", body } = {}) {
     const error = new Error(
       response.status === 401
         ? "Your admin session has expired. Sign in again."
-        : "This request could not be completed. Try again.",
+        : response.status === 429
+          ? "Too many attempts. Please wait a minute and try again."
+          : response.status >= 500
+            ? "DataVault is temporarily unavailable. Please try again shortly."
+            : "This request could not be completed. Check the details and try again.",
     );
     error.status = response.status;
     throw error;
@@ -41,9 +98,11 @@ async function api(path, { token, method = "GET", body } = {}) {
 }
 
 export default function PlatformAdmin() {
+  const verifiedCode = useRef("");
   const [token, setToken] = useState(null);
   const [authMode, setAuthMode] = useState("login");
   const [resetToken, setResetToken] = useState("");
+  const [accessToken, setAccessToken] = useState("");
   const [notice, setNotice] = useState("");
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState(0);
@@ -55,11 +114,15 @@ export default function PlatformAdmin() {
   const [reason, setReason] = useState("security_review");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  const [confirmation, setConfirmation] = useState(null);
   useEffect(() => {
-    function openResetLink() {
+    function openAccessLink() {
       const fragment = new URLSearchParams(window.location.hash.slice(1));
       const linkToken = fragment.get("reset");
-      if (!linkToken) return false;
+      const verification = fragment.get("verify_admin_request");
+      const setup = fragment.get("setup_admin");
+      if (!linkToken && !verification && !setup) return false;
       window.history.replaceState(
         null,
         "",
@@ -67,20 +130,54 @@ export default function PlatformAdmin() {
       );
       sessionStorage.removeItem(key);
       setToken(null);
-      setResetToken(linkToken);
-      setAuthMode("reset");
       setNotice("");
-      setError(
-        /^[A-Za-z0-9_-]{43}$/.test(linkToken)
-          ? ""
-          : "This reset link is invalid. Request a new one.",
-      );
+      if (linkToken) {
+        setResetToken(linkToken);
+        setAuthMode("reset");
+        setError(
+          /^[A-Za-z0-9_-]{43}$/.test(linkToken)
+            ? ""
+            : "This reset link is invalid. Request a new one.",
+        );
+      } else if (verification) {
+        setAuthMode("verifying");
+        if (verifiedCode.current === verification) return true;
+        verifiedCode.current = verification;
+        if (!/^[A-Za-z0-9_-]{43}$/.test(verification)) {
+          setAuthMode("verification_failed");
+          setError(
+            "This verification link is invalid or expired. Submit a new request if needed.",
+          );
+        } else {
+          api("access/verify", {
+            method: "POST",
+            body: { token: verification },
+          })
+            .then(() => setAuthMode("request_pending"))
+            .catch((failure) => {
+              setAuthMode("verification_failed");
+              setError(
+                failure.status === 400
+                  ? "This verification link has expired or was already used."
+                  : failure.message,
+              );
+            });
+        }
+      } else {
+        setAccessToken(setup);
+        setAuthMode("access_setup");
+        setError(
+          /^[A-Za-z0-9_-]{43}$/.test(setup)
+            ? ""
+            : "This setup link is invalid. Ask a platform admin for a new link.",
+        );
+      }
       return true;
     }
-    if (!openResetLink()) setToken(sessionStorage.getItem(key));
-    window.addEventListener("hashchange", openResetLink);
+    if (!openAccessLink()) setToken(sessionStorage.getItem(key));
+    window.addEventListener("hashchange", openAccessLink);
     setReady(true);
-    return () => window.removeEventListener("hashchange", openResetLink);
+    return () => window.removeEventListener("hashchange", openAccessLink);
   }, []);
   useEffect(() => {
     if (!token) return;
@@ -89,7 +186,7 @@ export default function PlatformAdmin() {
     setError("");
     const params = new URLSearchParams({ page: String(page), limit: "25" });
     if (search && [1, 2, 3].includes(tab)) params.set("search", search);
-    api(`${paths[tab]}${tab ? `?${params}` : ""}`, { token })
+    loadDirectory(`${paths[tab]}${tab ? `?${params}` : ""}`, token, tab === 4)
       .then((result) => {
         if (active) setData(result);
       })
@@ -101,7 +198,7 @@ export default function PlatformAdmin() {
     return () => {
       active = false;
     };
-  }, [token, tab, page, search]);
+  }, [token, tab, page, search, refresh]);
   function logout() {
     sessionStorage.removeItem(key);
     setToken(null);
@@ -190,11 +287,130 @@ export default function PlatformAdmin() {
       setBusy(false);
     }
   }
+  async function requestAccess(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const form = Object.fromEntries(new FormData(event.currentTarget));
+      await api("access/request", {
+        method: "POST",
+        body: {
+          fullName: form.fullName,
+          email: form.email,
+          ...(form.reason?.trim() ? { reason: form.reason.trim() } : {}),
+        },
+      });
+      setAuthMode("request_sent");
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function setupAccess(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const newPassword = form.get("newPassword");
+    if (newPassword !== form.get("confirmPassword")) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (
+      typeof newPassword !== "string" ||
+      newPassword.length < 12 ||
+      new TextEncoder().encode(newPassword).length > 72 ||
+      !/[a-z]/.test(newPassword) ||
+      !/[A-Z]/.test(newPassword) ||
+      !/\d/.test(newPassword) ||
+      !/[^A-Za-z0-9\s]/.test(newPassword)
+    ) {
+      setError(
+        "Use 12–72 bytes with uppercase and lowercase letters, a number, and a symbol.",
+      );
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api("access/setup", {
+        method: "POST",
+        body: { token: accessToken, newPassword },
+      });
+      setAccessToken("");
+      setAuthMode("login");
+      setNotice(
+        "Your platform admin account is ready. Sign in with your new password.",
+      );
+    } catch (failure) {
+      setError(
+        failure.status === 400
+          ? "This setup link has expired or was already used. Ask a platform admin for a new link."
+          : failure.message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   function changeAuthMode(mode) {
     setAuthMode(mode);
     if (mode !== "reset") setResetToken("");
     setError("");
     setNotice("");
+  }
+  async function reviewRequest() {
+    const { id, decision } = confirmation;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api(`access-requests/${id}/decision`, {
+        token,
+        method: "POST",
+        body: { decision },
+      });
+      setRefresh((value) => value + 1);
+      if (!result.notificationDelivered)
+        setNotice(
+          decision === "approve"
+            ? "Request approved, but the setup email could not be delivered. Use Resend setup link below."
+            : "Request rejected, but the decision email could not be delivered.",
+        );
+      else
+        setNotice(
+          `Request ${decision === "approve" ? "approved" : "rejected"}. Email sent.`,
+        );
+    } catch (failure) {
+      setError(
+        failure.status === 409
+          ? "This request was already reviewed. Refresh the list."
+          : failure.message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resendDecision(id, kind) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(
+        `access-requests/${id}/${kind === "approved" ? "resend-setup" : "resend-rejection"}`,
+        {
+          token,
+          method: "POST",
+          body: {},
+        },
+      );
+      setNotice(
+        kind === "approved"
+          ? "A new one-time setup link was emailed."
+          : "The rejection decision was emailed.",
+      );
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
   }
   async function openCompany(id) {
     setError("");
@@ -204,27 +420,26 @@ export default function PlatformAdmin() {
       setError(failure.message);
     }
   }
-  async function changeStatus(next) {
-    const name = detail.company.name;
-    if (
-      !window.confirm(
-        `${next === "suspend" ? "Suspend" : "Reactivate"} ${name}?`,
-      )
-    )
-      return;
+  async function changeStatus() {
+    const { next, company, reason: selectedReason } = confirmation;
     setBusy(true);
     setError("");
     try {
-      await api(`companies/${detail.company.id}/${next}`, {
+      await api(`companies/${company.id}/${next}`, {
         token,
         method: "POST",
-        body: next === "suspend" ? { reason } : {},
+        body: next === "suspend" ? { reason: selectedReason } : {},
       });
-      setDetail(await api(`companies/${detail.company.id}`, { token }));
-      setData(await api("companies?page=1&limit=25", { token }));
-      setPage(1);
-    } catch (failure) {
-      setError(failure.message);
+      // Reuse the directory loader so the current search and page are retained.
+      setRefresh((value) => value + 1);
+      try {
+        setDetail(await api(`companies/${company.id}`, { token }));
+      } catch {
+        setDetail(null);
+        setError(
+          "Company status updated, but its details could not be refreshed. Open the company again to check its status.",
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -246,18 +461,42 @@ export default function PlatformAdmin() {
               ? "Platform administration"
               : authMode === "reset"
                 ? "Set a new password"
-                : authMode === "sent"
-                  ? "Check your email"
-                  : "Recover admin access"}
+                : authMode === "request"
+                  ? "Request platform admin access"
+                  : authMode === "verifying"
+                    ? "Verifying your email"
+                    : authMode === "verification_failed"
+                      ? "Verification unavailable"
+                      : authMode === "request_sent"
+                        ? "Check your email"
+                        : authMode === "request_pending"
+                          ? "Request sent"
+                          : authMode === "access_setup"
+                            ? "Set your admin password"
+                            : authMode === "sent"
+                              ? "Check your email"
+                              : "Recover admin access"}
           </h1>
           <p>
             {authMode === "login"
               ? "Use your separate DataVault platform admin credentials."
               : authMode === "reset"
                 ? "Choose a new password for your platform admin account."
-                : authMode === "sent"
-                  ? "Follow the one-time link in the email to continue."
-                  : "Enter your platform admin email to receive a reset link."}
+                : authMode === "request"
+                  ? "Verify your email, then an existing platform admin will review your request."
+                  : authMode === "verifying"
+                    ? "Checking your one-time verification link…"
+                    : authMode === "request_sent"
+                      ? "If your request can be received, a verification link will arrive shortly. Check your inbox and spam folder."
+                      : authMode === "request_pending"
+                        ? "Your email is verified. Please wait for an admin decision by email."
+                        : authMode === "access_setup"
+                          ? "Your request was approved. Create a password to activate your platform admin account."
+                          : authMode === "verification_failed"
+                            ? "The link could not be verified."
+                            : authMode === "sent"
+                              ? "Follow the one-time link in the email to continue."
+                              : "Enter your platform admin email to receive a reset link."}
           </p>
           {error && (
             <p className="platform-error" role="alert">
@@ -297,6 +536,13 @@ export default function PlatformAdmin() {
               >
                 Forgot admin password?
               </button>
+              <button
+                type="button"
+                className="platform-text-button"
+                onClick={() => changeAuthMode("request")}
+              >
+                Request platform admin access
+              </button>
               <Link href="/login" className="text-link">
                 Company workspace sign in
               </Link>
@@ -313,6 +559,62 @@ export default function PlatformAdmin() {
               />
               <Button busy={busy} className="full">
                 Email reset link <ArrowRight size={16} />
+              </Button>
+            </form>
+          )}
+          {authMode === "request" && (
+            <form onSubmit={requestAccess} className="form-stack">
+              <Field
+                label="Full name"
+                name="fullName"
+                autoComplete="name"
+                minLength={2}
+                maxLength={100}
+                required
+              />
+              <Field
+                label="Email address"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+              />
+              <Field
+                label="Why do you need access? (optional)"
+                name="reason"
+                maxLength={500}
+              />
+              <Button busy={busy} className="full">
+                Send verification email <ArrowRight size={16} />
+              </Button>
+            </form>
+          )}
+          {authMode === "verifying" && <Loading label="Verifying your email" />}
+          {authMode === "access_setup" && (
+            <form onSubmit={setupAccess} className="form-stack">
+              <Field
+                label="New password"
+                name="newPassword"
+                type="password"
+                autoComplete="new-password"
+                minLength={12}
+                required
+                hint="At least 12 characters with uppercase and lowercase letters, a number, and a symbol."
+              />
+              <Field
+                label="Confirm new password"
+                name="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                minLength={12}
+                required
+              />
+              <Button
+                busy={busy}
+                disabled={!/^[A-Za-z0-9_-]{43}$/.test(accessToken)}
+                className="full"
+              >
+                Activate admin account <ArrowRight size={16} />
               </Button>
             </form>
           )}
@@ -378,6 +680,7 @@ export default function PlatformAdmin() {
               type="button"
               className={tab === index ? "active" : ""}
               onClick={() => {
+                setData(null);
                 setTab(index);
                 setPage(1);
                 setSearch("");
@@ -406,6 +709,11 @@ export default function PlatformAdmin() {
         {error && (
           <p className="platform-error" role="alert">
             {error}
+          </p>
+        )}
+        {notice && (
+          <p className="platform-notice" role="status">
+            {notice}
           </p>
         )}
         {tab > 0 && tab < 4 && (
@@ -460,6 +768,113 @@ export default function PlatformAdmin() {
               <small>{data.pendingInvitations ?? 0} pending invitations</small>
             </article>
           </div>
+        ) : tab === 5 ? (
+          <div className="platform-access-list">
+            <p className="platform-access-intro">
+              Only verified email requests appear here. Approval sends a
+              one-time password setup link; it does not sign the requester in.
+            </p>
+            {items.length === 0 ? (
+              <div className="platform-access-empty">
+                No verified access requests yet.
+              </div>
+            ) : (
+              items.map((item) => (
+                <article className="platform-access-item" key={item.id}>
+                  <div className="platform-access-item-heading">
+                    <div>
+                      <h2>{item.fullName}</h2>
+                      <p>{item.email}</p>
+                    </div>
+                    <span
+                      className={`platform-access-status status-${item.status}`}
+                    >
+                      {item.status.replaceAll("_", " ")}
+                    </span>
+                  </div>
+                  {item.reason && (
+                    <p className="platform-access-reason">{item.reason}</p>
+                  )}
+                  <p className="platform-access-meta">
+                    Verified {timestamp(item.verifiedAt)}
+                    {item.reviewedAt
+                      ? ` · Reviewed ${timestamp(item.reviewedAt)}`
+                      : ""}
+                  </p>
+                  {item.status === "pending_review" && (
+                    <div className="platform-access-actions">
+                      <Button
+                        disabled={busy}
+                        onClick={() =>
+                          setConfirmation({
+                            id: item.id,
+                            name: item.fullName,
+                            decision: "approve",
+                          })
+                        }
+                      >
+                        Approve request
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={busy}
+                        onClick={() =>
+                          setConfirmation({
+                            id: item.id,
+                            name: item.fullName,
+                            decision: "reject",
+                          })
+                        }
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  )}
+                  {item.status === "approved" && (
+                    <button
+                      type="button"
+                      className="platform-text-button"
+                      disabled={busy}
+                      onClick={() => resendDecision(item.id, "approved")}
+                    >
+                      Resend setup link
+                    </button>
+                  )}
+                  {item.status === "rejected" && (
+                    <button
+                      type="button"
+                      className="platform-text-button"
+                      disabled={busy}
+                      onClick={() => resendDecision(item.id, "rejected")}
+                    >
+                      Resend decision email
+                    </button>
+                  )}
+                </article>
+              ))
+            )}
+            <div className="platform-pager">
+              <span>
+                {data.total ?? 0} requests · Page {page}
+              </span>
+              <div>
+                <Button
+                  variant="secondary"
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={page * 25 >= (data.total ?? 0)}
+                  onClick={() => setPage(page + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : (
           <>
             <div className="platform-list">
@@ -476,7 +891,8 @@ export default function PlatformAdmin() {
                             ? item.fullName || item.email
                             : tab === 3
                               ? item.originalFilename
-                              : item.action}
+                              : item.action?.replaceAll("_", " ") ||
+                                "Audit event"}
                       </strong>
                       <small>
                         {tab === 1
@@ -485,12 +901,18 @@ export default function PlatformAdmin() {
                             ? `${item.email} · ${item.role}`
                             : tab === 3
                               ? `${item.fileType} · ${item.visibility}`
-                              : `${item.targetType || "Platform"} · ${item.reason || "—"}`}
+                              : `${item.targetType === "company" ? item.companyName || `Company unavailable (${item.targetId || "unknown ID"})` : item.targetType === "admin_access_request" ? "Platform access request" : "Platform admin"} · ${item.reason?.replaceAll("_", " ") || "—"}`}
                       </small>
                     </div>
-                    <span>
-                      {tab === 1 ? item.platformStatus : date(item.createdAt)}
-                    </span>
+                    {tab === 4 ? (
+                      <time dateTime={item.createdAt}>
+                        {timestamp(item.createdAt)}
+                      </time>
+                    ) : (
+                      <span>
+                        {tab === 1 ? item.platformStatus : date(item.createdAt)}
+                      </span>
+                    )}
                     {tab === 1 && (
                       <button
                         className="text-link"
@@ -564,7 +986,15 @@ export default function PlatformAdmin() {
               </div>
             </dl>
             {detail.company.platformStatus === "suspended" ? (
-              <Button busy={busy} onClick={() => changeStatus("reactivate")}>
+              <Button
+                busy={busy}
+                onClick={() =>
+                  setConfirmation({
+                    next: "reactivate",
+                    company: detail.company,
+                  })
+                }
+              >
                 Reactivate company
               </Button>
             ) : (
@@ -583,7 +1013,13 @@ export default function PlatformAdmin() {
                 <Button
                   busy={busy}
                   variant="danger"
-                  onClick={() => changeStatus("suspend")}
+                  onClick={() =>
+                    setConfirmation({
+                      next: "suspend",
+                      company: detail.company,
+                      reason,
+                    })
+                  }
                 >
                   Suspend company
                 </Button>
@@ -592,6 +1028,39 @@ export default function PlatformAdmin() {
           </section>
         )}
       </section>
+      {confirmation && (
+        <Confirm
+          title={
+            confirmation.decision
+              ? `${confirmation.decision === "approve" ? "Approve" : "Reject"} ${confirmation.name}'s request?`
+              : `${confirmation.next === "suspend" ? "Suspend" : "Reactivate"} ${confirmation.company.name}?`
+          }
+          description={
+            confirmation.decision
+              ? confirmation.decision === "approve"
+                ? "A one-time password setup link will be sent to the verified email address. The requester will get admin access only after completing setup."
+                : "The requester will receive a rejection email and will not get admin access."
+              : confirmation.next === "suspend"
+                ? `This blocks the company's owners and employees from accessing DataVault until it is reactivated. Reason: ${confirmation.reason.replaceAll("_", " ")}. Files and company data will be kept.`
+                : "This restores access for eligible owners and employees. Existing account activation requirements still apply."
+          }
+          label={
+            confirmation.decision
+              ? confirmation.decision === "approve"
+                ? "Approve request"
+                : "Reject request"
+              : confirmation.next === "suspend"
+                ? "Suspend company"
+                : "Reactivate company"
+          }
+          dangerous={
+            confirmation.decision === "reject" ||
+            confirmation.next === "suspend"
+          }
+          onClose={() => setConfirmation(null)}
+          onConfirm={confirmation.decision ? reviewRequest : changeStatus}
+        />
+      )}
     </main>
   );
 }

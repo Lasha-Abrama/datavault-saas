@@ -18,6 +18,12 @@ import { AdminService } from './admin.service';
 import { adminAuditSchema } from './entities/admin-audit.entity';
 import { platformAdminSchema } from './entities/platform-admin.entity';
 import { PlatformAdminGuard } from './platform-admin.guard';
+import { adminAccessRequestSchema } from './entities/admin-access-request.entity';
+import { AdminAccessRequestService } from './admin-access-request.service';
+import {
+  AdminAccessRequestController,
+  AdminPublicAccessController,
+} from './admin-access-request.controller';
 
 @Module({
   imports: [
@@ -27,6 +33,7 @@ import { PlatformAdminGuard } from './platform-admin.guard';
     MongooseModule.forFeature([
       { name: 'platformAdmin', schema: platformAdminSchema },
       { name: 'adminAudit', schema: adminAuditSchema },
+      { name: 'adminAccessRequest', schema: adminAccessRequestSchema },
       { name: 'company', schema: companySchema },
       { name: 'companyFile', schema: companyFileSchema },
       { name: 'user', schema: userSchema },
@@ -35,10 +42,16 @@ import { PlatformAdminGuard } from './platform-admin.guard';
       { name: 'employeeInvitation', schema: employeeInvitationSchema },
     ]),
   ],
-  controllers: [AdminController, AdminAuthController],
+  controllers: [
+    AdminController,
+    AdminAuthController,
+    AdminPublicAccessController,
+    AdminAccessRequestController,
+  ],
   providers: [
     AdminService,
     AdminAuthService,
+    AdminAccessRequestService,
     PlatformAdminGuard,
     {
       provide: PLATFORM_ADMIN_JWT,

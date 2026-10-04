@@ -82,7 +82,7 @@ export default function AuthPage({ mode }) {
       setError(
         new Error(
           denied === "account_unavailable"
-            ? "This account is not active. Try signing in or request a new activation email."
+            ? "Your company’s workspace is unavailable. It may be inactive or suspended. Contact your company administrator or DataVault support for help."
             : denied === "google_auth_cancelled"
               ? "Google sign-in was cancelled. You can try again below."
               : "Google sign-in could not be completed. Please try again.",

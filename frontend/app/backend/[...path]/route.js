@@ -2,6 +2,12 @@
 const routes = [
   ["POST", /^admin\/auth\/login$/],
   ["POST", /^admin\/auth\/(forgot-password|reset-password)$/],
+  ["POST", /^admin\/access\/(request|verify|setup)$/],
+  ["GET", /^admin\/access-requests$/],
+  [
+    "POST",
+    /^admin\/access-requests\/[a-f\d]{24}\/(decision|resend-setup|resend-rejection)$/i,
+  ],
   ["GET", /^admin\/(dashboard|companies|users|files|audit-logs)$/],
   ["GET", /^admin\/companies\/[a-f\d]{24}$/i],
   ["POST", /^admin\/companies\/[a-f\d]{24}\/(suspend|reactivate)$/i],

@@ -12,6 +12,11 @@ export enum AdminAuditAction {
   LOGIN_FAILED = 'login_failed',
   COMPANY_SUSPENDED = 'company_suspended',
   COMPANY_REACTIVATED = 'company_reactivated',
+  ACCESS_REQUESTED = 'admin_access_requested',
+  ACCESS_VERIFIED = 'admin_access_verified',
+  ACCESS_APPROVED = 'admin_access_approved',
+  ACCESS_REJECTED = 'admin_access_rejected',
+  ACCESS_ACTIVATED = 'admin_access_activated',
 }
 
 export enum AdminAuditReason {
@@ -38,8 +43,12 @@ export class AdminAudit {
   @Prop({ type: MongoSchema.Types.ObjectId, immutable: true })
   targetId?: Types.ObjectId;
 
-  @Prop({ type: String, enum: ['platform_admin', 'company'], immutable: true })
-  targetType?: 'platform_admin' | 'company';
+  @Prop({
+    type: String,
+    enum: ['platform_admin', 'company', 'admin_access_request'],
+    immutable: true,
+  })
+  targetType?: 'platform_admin' | 'company' | 'admin_access_request';
 
   @Prop({
     type: String,

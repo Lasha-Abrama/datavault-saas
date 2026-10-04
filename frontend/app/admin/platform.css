@@ -225,6 +225,15 @@
 .platform-detail h2 {
   margin: 15px 0 4px;
 }
+.platform-row time {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.platform-row > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .platform-detail dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -239,6 +248,64 @@
   margin: 2px 0 0;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+.platform-access-list {
+  display: grid;
+  gap: 14px;
+}
+.platform-access-intro,
+.platform-access-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+.platform-access-empty,
+.platform-access-item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px;
+}
+.platform-access-item {
+  display: grid;
+  gap: 13px;
+}
+.platform-access-item-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 15px;
+}
+.platform-access-item h2 {
+  font-size: 18px;
+}
+.platform-access-item p {
+  overflow-wrap: anywhere;
+}
+.platform-access-item-heading p,
+.platform-access-reason {
+  color: var(--muted);
+}
+.platform-access-status {
+  white-space: nowrap;
+  text-transform: capitalize;
+  border-radius: 100px;
+  padding: 7px 11px;
+  background: var(--mint);
+  color: var(--teal-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+.platform-access-status.status-rejected {
+  background: #fff1ee;
+  color: #883e32;
+}
+.platform-access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.platform-access-item > .platform-text-button {
+  justify-self: start;
 }
 .platform-actions {
   display: flex;
@@ -283,6 +350,9 @@
   }
   .platform-row > span {
     display: none;
+  }
+  .platform-row time {
+    grid-column: 1 / -1;
   }
 }
 @media (max-width: 480px) {

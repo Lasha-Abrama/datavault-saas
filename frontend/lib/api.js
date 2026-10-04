@@ -56,6 +56,13 @@ export class ApiError extends Error {
         "We couldn’t connect to DataVault. Please check your connection and try again.",
     );
     this.status = status;
+    if (
+      context === "/auth/sign-in" &&
+      status === 401 &&
+      body?.message === "Account is unavailable"
+    )
+      this.message =
+        "Your company’s access to DataVault is suspended. Contact your company administrator or DataVault support for help.";
     this.code = typeof body?.code === "string" ? body.code : "";
     if (context.startsWith("/payments/")) {
       if (
