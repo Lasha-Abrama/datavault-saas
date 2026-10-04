@@ -293,6 +293,8 @@ describe('company registration and activation (e2e)', () => {
       .useValue({})
       .overrideProvider(getModelToken('adminAudit'))
       .useValue({})
+      .overrideProvider(getModelToken('adminAccessRequest'))
+      .useValue({})
       .overrideProvider(getModelToken('companyVerification'))
       .useValue(verificationModel)
       .overrideProvider(getModelToken('googleOAuthState'))

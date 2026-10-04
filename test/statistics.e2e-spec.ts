@@ -258,6 +258,8 @@ describe('company statistics dashboard (e2e)', () => {
       .useValue({})
       .overrideProvider(getModelToken('adminAudit'))
       .useValue({})
+      .overrideProvider(getModelToken('adminAccessRequest'))
+      .useValue({})
       .overrideProvider(getModelToken('companyVerification'))
       .useValue({})
       .overrideProvider(getModelToken('googleOAuthState'))

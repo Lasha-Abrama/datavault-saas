@@ -85,6 +85,8 @@ describe('tenant AI assistant (e2e, mocked OpenRouter)', () => {
       })
       .overrideProvider(getModelToken('companyVerification'))
       .useValue({})
+      .overrideProvider(getModelToken('adminAccessRequest'))
+      .useValue({})
       .overrideProvider(getModelToken('googleOAuthState'))
       .useValue({})
       .overrideProvider(getModelToken('googleOAuthExchange'))

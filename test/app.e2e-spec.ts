@@ -169,6 +169,8 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .useValue({})
       .overrideProvider(getModelToken('adminAudit'))
       .useValue({})
+      .overrideProvider(getModelToken('adminAccessRequest'))
+      .useValue({})
       .overrideProvider(getModelToken('aiConversation'))
       .useValue({})
       .overrideProvider(getModelToken('aiMessage'))
