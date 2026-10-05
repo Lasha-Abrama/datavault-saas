@@ -8,6 +8,7 @@ export interface AuthenticatedRequest extends Request {
 export interface TokenPayload {
   id: string;
   type?: string;
+  version?: number;
 }
 
 export interface GoogleUser {

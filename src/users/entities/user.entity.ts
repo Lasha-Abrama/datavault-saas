@@ -19,6 +19,18 @@ export class User {
   @Prop({ type: String, select: false })
   password?: string;
 
+  @Prop({ type: String, select: false })
+  passwordResetTokenHash?: string;
+
+  @Prop({ type: Date, select: false })
+  passwordResetExpiresAt?: Date;
+
+  @Prop({ type: Date, select: false })
+  passwordResetRequestedAt?: Date;
+
+  @Prop({ type: Number, default: 0 })
+  authVersion?: number;
+
   @Prop({
     type: MongooseSchema.Types.ObjectId,
     ref: 'company',
@@ -45,6 +57,10 @@ userSchema.index({ role: 1, createdAt: -1, _id: -1 });
 userSchema.set('toJSON', {
   transform: (_doc, ret) => {
     delete ret.password;
+    delete ret.passwordResetTokenHash;
+    delete ret.passwordResetExpiresAt;
+    delete ret.passwordResetRequestedAt;
+    delete ret.authVersion;
     return ret;
   },
 });

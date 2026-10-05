@@ -35,7 +35,8 @@ export class IsAuthGuard implements CanActivate {
       if (
         !user ||
         !(user.companyId instanceof Types.ObjectId) ||
-        !Object.values(Role).includes(user.role)
+        !Object.values(Role).includes(user.role) ||
+        (payload.version ?? 0) !== (user.authVersion ?? 0)
       )
         throw new Error('Invalid user membership');
       const company = await this.companyModel.findOne({

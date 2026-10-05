@@ -134,6 +134,12 @@ export class ApiError extends Error {
     )
       this.message =
         "Your Google registration link has expired. Start again with Google.";
+    if (context === "/auth/reset-password" && [400, 401].includes(status))
+      this.message =
+        "This reset link is invalid, expired, or has already been used. Request a new link.";
+    if (context === "/auth/forgot-password" && status >= 500)
+      this.message =
+        "We couldn’t request a reset link right now. Please try again shortly.";
     this.fields = {};
     if (status === 400 && Array.isArray(body?.message)) {
       for (const item of body.message) {

@@ -137,6 +137,24 @@ export default function AuthPage({ mode }) {
       );
   }, [mode]);
   useEffect(() => {
+    if (mode !== "reset-password") return;
+    function captureResetToken() {
+      const url = new URL(window.location.href);
+      const fragment = new URLSearchParams(url.hash.slice(1));
+      if (url.hash) {
+        setToken(
+          fragment.getAll("token").length === 1 ? fragment.get("token") : "",
+        );
+        window.history.replaceState(null, "", url.pathname + url.search);
+      }
+      setTokenReady(true);
+    }
+    captureResetToken();
+    window.addEventListener("hashchange", captureResetToken);
+    return () => window.removeEventListener("hashchange", captureResetToken);
+  }, [mode]);
+  useEffect(() => {
+    if (mode === "reset-password") return;
     if (captured.current) return;
     captured.current = true;
     const url = new URL(window.location.href);
@@ -146,7 +164,7 @@ export default function AuthPage({ mode }) {
       window.history.replaceState(null, "", url.pathname + url.search);
     }
     setTokenReady(true);
-  }, []);
+  }, [mode]);
   async function submit(event) {
     event.preventDefault();
     setBusy(true);
@@ -156,6 +174,31 @@ export default function AuthPage({ mode }) {
       if (mode === "login") {
         await login(values);
         router.replace(loginDestination());
+      }
+      if (mode === "forgot-password") {
+        await request("/auth/forgot-password", {
+          method: "POST",
+          body: { email: values.email },
+          public: true,
+        });
+        setSuccess(
+          "If this email belongs to an active workspace, a reset link will arrive shortly. Check your inbox and spam folder. The link expires after 30 minutes.",
+        );
+      }
+      if (mode === "reset-password") {
+        if (values.newPassword !== values.confirmPassword) {
+          setError(new Error("Passwords do not match. Please try again."));
+          return;
+        }
+        await request("/auth/reset-password", {
+          method: "POST",
+          body: { token, newPassword: values.newPassword },
+          public: true,
+        });
+        setToken("");
+        setSuccess(
+          "Your password has been updated. Sign in with your new password to open your workspace.",
+        );
       }
       if (mode === "register") {
         if (googleCode) {
@@ -299,7 +342,11 @@ export default function AuthPage({ mode }) {
             <div className="success-panel">
               <ShieldCheck size={32} />
               <h3>
-                {mode === "register" ? "Check your inbox" : "You’re all set"}
+                {mode === "register" || mode === "forgot-password"
+                  ? "Check your inbox"
+                  : mode === "reset-password"
+                    ? "Password updated"
+                    : "You’re all set"}
               </h3>
               <p>{success}</p>
               <Link className="button" href="/login">
@@ -307,16 +354,80 @@ export default function AuthPage({ mode }) {
               </Link>
             </div>
           ) : recovery ? (
-            <>
-              <Alert type="info">
-                Email password recovery isn’t available yet. If you can still
-                sign in, you can change your password in Settings → Security.
-                Otherwise, contact your workspace administrator.
-              </Alert>
-              <Link className="button secondary" href="/login">
-                Back to sign in
+            <form onSubmit={submit} className="form-stack">
+              {mode === "forgot-password" ? (
+                <>
+                  <p className="muted small">
+                    Enter your workspace email and we’ll send a one-time reset
+                    link.
+                  </p>
+                  <Field
+                    label="Work email"
+                    name="email"
+                    type="email"
+                    placeholder="you@company.com"
+                    autoComplete="email"
+                    maxLength={254}
+                    required
+                    error={error?.fields?.email}
+                  />
+                  <Button busy={busy} className="full">
+                    Email reset link <ArrowRight size={17} />
+                  </Button>
+                </>
+              ) : !tokenReady ? (
+                <Loading label="Checking reset link" />
+              ) : !/^[A-Za-z0-9_-]{43}$/.test(token) ? (
+                <Alert>
+                  This reset link is missing or invalid. Open the complete link
+                  from your email, or request a new one.
+                </Alert>
+              ) : (
+                <>
+                  <p className="muted small">
+                    Choose a new password for your DataVault workspace.
+                  </p>
+                  <Field
+                    label="New password"
+                    name="newPassword"
+                    type="password"
+                    autoComplete="new-password"
+                    minLength={8}
+                    maxLength={72}
+                    required
+                    hint="8–72 characters"
+                    error={error?.fields?.newPassword}
+                  />
+                  <Field
+                    label="Confirm new password"
+                    name="confirmPassword"
+                    type="password"
+                    autoComplete="new-password"
+                    minLength={8}
+                    maxLength={72}
+                    required
+                  />
+                  <Button busy={busy} className="full">
+                    Reset password <ArrowRight size={17} />
+                  </Button>
+                </>
+              )}
+              {busy && (
+                <p className="muted small" role="status">
+                  Connecting… DataVault may take a moment to wake up.
+                </p>
+              )}
+              <Link
+                className="text-link"
+                href={
+                  mode === "forgot-password" ? "/login" : "/forgot-password"
+                }
+              >
+                {mode === "forgot-password"
+                  ? "Back to sign in"
+                  : "Request a new link"}
               </Link>
-            </>
+            </form>
           ) : (loading || oauthStatus !== "idle") &&
             ["login", "register"].includes(mode) ? (
             <Loading

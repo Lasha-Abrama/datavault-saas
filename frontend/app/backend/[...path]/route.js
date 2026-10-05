@@ -20,7 +20,7 @@ const routes = [
   ["GET", /^auth\/current-user$/],
   [
     "POST",
-    /^auth\/(sign-in|sign-up|verify-account|resend-verification|google\/(exchange|register))$/,
+    /^auth\/(sign-in|sign-up|verify-account|resend-verification|forgot-password|reset-password|google\/(exchange|register))$/,
   ],
   [
     "GET",

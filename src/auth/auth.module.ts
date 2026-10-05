@@ -19,6 +19,7 @@ import { CompanyVerificationService } from './company-verification.service';
 import { GoogleOAuthFlowService } from './google-oauth-flow.service';
 import { googleOAuthStateSchema } from './entities/google-oauth-state.entity';
 import { googleOAuthExchangeSchema } from './entities/google-oauth-exchange.entity';
+import { PasswordRecoveryService } from './password-recovery.service';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { googleOAuthExchangeSchema } from './entities/google-oauth-exchange.enti
     RolesGuard,
     GoogleOauthGuard,
     CompanyVerificationService,
+    PasswordRecoveryService,
     GoogleOAuthFlowService,
     {
       provide: GoogleStrategy,

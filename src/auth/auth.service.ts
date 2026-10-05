@@ -183,7 +183,10 @@ export class AuthService {
 
   private async signToken(user: User & { _id: Types.ObjectId }) {
     await this.assertTenantAccess(user);
-    return this.jwtService.signAsync({ id: user._id.toString() });
+    return this.jwtService.signAsync({
+      id: user._id.toString(),
+      version: user.authVersion ?? 0,
+    });
   }
 
   private async assertTenantAccess(user: User & { _id: Types.ObjectId }) {

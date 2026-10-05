@@ -9,6 +9,7 @@ import { AuthController } from '../src/auth/auth.controller';
 import { AuthService } from '../src/auth/auth.service';
 import { CompanyVerificationService } from '../src/auth/company-verification.service';
 import { GoogleOAuthFlowService } from '../src/auth/google-oauth-flow.service';
+import { PasswordRecoveryService } from '../src/auth/password-recovery.service';
 import { GoogleStrategy } from '../src/auth/strategies/google.strategy';
 import { configureApp } from '../src/config/configure-app';
 import { GoogleOauthGuard } from '../src/guards/google-oauth.guard';
@@ -56,6 +57,7 @@ describe('Google OAuth browser binding (e2e, no provider call)', () => {
         { provide: AuthService, useValue: auth },
         { provide: CompanyVerificationService, useValue: {} },
         { provide: GoogleOAuthFlowService, useValue: flow },
+        { provide: PasswordRecoveryService, useValue: {} },
       ],
     })
       .overrideGuard(IsAuthGuard)

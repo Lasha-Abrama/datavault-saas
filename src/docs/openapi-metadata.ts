@@ -36,6 +36,8 @@ import { SignUpDto } from '../auth/dto/sign-up.dto';
 import { VerifyAccountDto } from '../auth/dto/verify-account.dto';
 import { GoogleExchangeDto } from '../auth/dto/google-exchange.dto';
 import { GoogleRegistrationDto } from '../auth/dto/google-registration.dto';
+import { ForgotPasswordDto } from '../auth/dto/forgot-password.dto';
+import { ResetPasswordDto } from '../auth/dto/reset-password.dto';
 import { CompaniesController } from '../companies/companies.controller';
 import { CompanyFileVisibility } from '../files/entities/company-file.entity';
 import { FilesController } from '../files/files.controller';
@@ -205,6 +207,40 @@ export function applyOpenApiMetadata() {
     ApiTooManyRequestsResponse(
       error('Public authentication rate limit exceeded.'),
     ),
+  );
+  decorateMethod(
+    AuthController,
+    'forgotPassword',
+    ApiOperation({ summary: 'Email a one-time workspace password reset link' }),
+    ApiBody({ type: ForgotPasswordDto }),
+    ApiAcceptedResponse({
+      description:
+        'Generic response regardless of account eligibility or email delivery.',
+      schema: apiSchemas.message,
+    }),
+    ApiBadRequestResponse(error('Email address failed validation.')),
+    ApiTooManyRequestsResponse(error('Recovery request rate limit exceeded.')),
+  );
+  decorateMethod(
+    AuthController,
+    'resetPassword',
+    ApiOperation({
+      summary: 'Reset a workspace password with a one-time link',
+    }),
+    ApiBody({ type: ResetPasswordDto }),
+    ApiOkResponse({
+      description: 'Password updated and earlier tenant sessions invalidated.',
+      schema: {
+        type: 'object',
+        required: ['reset'],
+        properties: { reset: { type: 'boolean', enum: [true] } },
+      },
+    }),
+    ApiBadRequestResponse(error('Reset token or password failed validation.')),
+    ApiUnauthorizedResponse(
+      error('Reset link is invalid, expired, or already used.'),
+    ),
+    ApiTooManyRequestsResponse(error('Reset rate limit exceeded.')),
   );
   decorateMethod(
     AuthController,

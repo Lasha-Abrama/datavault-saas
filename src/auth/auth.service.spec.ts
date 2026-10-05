@@ -201,7 +201,10 @@ describe('AuthService company onboarding', () => {
     await expect(service.signIn(registration)).resolves.toEqual({
       accessToken: 'token',
     });
-    expect(jwt.signAsync).toHaveBeenCalledWith({ id: userId.toString() });
+    expect(jwt.signAsync).toHaveBeenCalledWith({
+      id: userId.toString(),
+      version: 0,
+    });
     await expect(
       service.signIn({ email: registration.email, password: 'incorrect' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);

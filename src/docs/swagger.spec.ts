@@ -101,7 +101,7 @@ describe('OpenAPI document', () => {
       0,
     );
 
-    expect(operationCount).toBe(56);
+    expect(operationCount).toBe(58);
     expect(document.info).toMatchObject({
       title: 'DataVault SaaS API',
       version: '1.0',
@@ -116,6 +116,21 @@ describe('OpenAPI document', () => {
         expect(Object.keys(operation.responses).length).toBeGreaterThan(0);
       }
     }
+  });
+
+  it('documents workspace recovery separately from platform admin recovery', () => {
+    const forgot = requireOperation(
+      requirePath(document, '/auth/forgot-password'),
+      'post',
+    );
+    const reset = requireOperation(
+      requirePath(document, '/auth/reset-password'),
+      'post',
+    );
+    expect(forgot.security).toBeUndefined();
+    expect(reset.security).toBeUndefined();
+    expect(forgot.responses?.['202']).toBeDefined();
+    expect(reset.responses?.['200']).toBeDefined();
   });
 
   it('documents Google exchange as public and only returns the normal token response', () => {

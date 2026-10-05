@@ -29,6 +29,9 @@ import { CompanyVerificationService } from './company-verification.service';
 import { GoogleOAuthFlowService } from './google-oauth-flow.service';
 import { GoogleExchangeDto } from './dto/google-exchange.dto';
 import { GoogleRegistrationDto } from './dto/google-registration.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { PasswordRecoveryService } from './password-recovery.service';
 
 @Controller('auth')
 export class AuthController {
@@ -37,6 +40,7 @@ export class AuthController {
     private readonly companyVerificationService: CompanyVerificationService,
     private readonly config: ConfigService,
     private readonly googleOAuthFlow: GoogleOAuthFlowService,
+    private readonly passwordRecovery: PasswordRecoveryService,
   ) {}
 
   @Get('google')
@@ -129,6 +133,22 @@ export class AuthController {
   @Throttle({ publicAuth: { limit: 10, ttl: 60_000 } })
   signIn(@Body() dto: SignInDto) {
     return this.authService.signIn(dto);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ publicAuth: { limit: 5, ttl: 60_000 } })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.passwordRecovery.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ publicAuth: { limit: 10, ttl: 60_000 } })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.passwordRecovery.resetPassword(dto.token, dto.newPassword);
   }
 
   @Post('sign-up')
