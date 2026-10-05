@@ -39,16 +39,16 @@ Read against `../FRONTEND_HANDOFF.md` and the deployed `/docs/openapi.json` on 2
 | Overview | GET /statistics/current | Company-wide aggregates as explicitly exposed to both roles |
 | Files | GET/POST /files; GET/DELETE /files/:id; GET /files/:id/download | Multipart file, visibility, JSON-array-string restrictedUserIds |
 | Permissions | PATCH /files/:id/permissions | company_wide or restricted; owner or uploader |
-| Employees | GET /users; DELETE /users/:id | Owner only |
+| Employees | GET /users, /users/:id; PATCH/DELETE /users/:id | Owner can view and rename employees or remove access |
 | Invitations | GET/POST /invitations; POST /invitations/:id/resend; DELETE /invitations/:id | Owner only; handle ambiguous email failure without automatic mutation retries |
 | Plans | GET /plans; GET/PATCH /subscriptions/current | Both roles can read; only owner changes planCode |
 | Billing estimate | GET /subscriptions/current/billing | Internal estimate, activation-anchored period; distinct from Stripe invoices |
 | Stripe test billing | GET /payments/current; POST /payments/checkout, /payments/portal, /payments/plan, /payments/cancel, /payments/reconcile | Owner-only payment setup, invoices, plan changes, and explicit synchronization |
-| Platform administration | POST /admin/auth/login; GET /admin/dashboard, /admin/companies, /admin/users, /admin/files, /admin/audit-logs; POST company suspend/reactivate | Separate `/admin` session; bootstrap credentials with `npm run admin:bootstrap` in the backend |
+| Platform administration | POST /admin/auth/login, /admin/auth/forgot-password, /admin/auth/reset-password; GET /admin/dashboard, /admin/companies, /admin/users, /admin/files, /admin/audit-logs, /admin/access-requests; POST company suspend/reactivate and access-request decisions | Separate `/admin` session; bootstrap the first administrator with `npm run admin:bootstrap` |
 
 ## Backend limitations intentionally reflected in the UI
 
-- Storage is disabled in the handoff. Upload, download, and deletion controls are gated; fully implemented upload/permission components become available with the storage flag.
+- File controls are available. The backend reports an error if storage is not configured; a live upload still requires working S3 credentials and a suitable tenant account.
 - No forgot-password/reset-password endpoints exist. Those routes explain the limitation; authenticated password changes work. New passwords are limited to 20 characters because sign-in currently rejects longer values even though password change accepts up to 72.
 - There is no public invitation-preview endpoint, so the join page does not invent a company name.
 - There is no audit log, notification feed, workspace switcher, storage byte quota, or invitation-created timestamp. The app does not fabricate these. File search, format/access filters, sorting, and usage views are the additional features.
@@ -60,17 +60,15 @@ Read against `../FRONTEND_HANDOFF.md` and the deployed `/docs/openapi.json` on 2
 
 `npm run build -- --webpack` checks production compilation. `npm test` runs Playwright against an already running localhost:3000 server, using Playwright Chromium. Tests mock the documented API only within the browser test process. They cover session redirects, expiry, member restrictions, 403 handling, permission payloads, activation token removal, Google registration, platform admin isolation, filtering, and mobile navigation/overflow. These are not substitutes for live authenticated integration tests.
 
-No real account has been created or existing tenant data modified during development. A disposable activated account and verified email sender/storage are needed to complete live registration, invitation, upload, and mutation testing.
+No real account has been created or existing tenant data modified during development. A disposable activated account and test mailbox are needed to complete live registration, invitation, upload, and mutation testing.
 
-
-## Verified results (2026-09-25)
+## Verified results (2026-10-05)
 
 - Next.js 16.3.6 production build passed.
-- Six Playwright browser tests passed (five isolated API-contract tests and one live read-only backend test).
+- All 48 Playwright browser tests passed, including three live public API checks. The remaining tests intercept API responses.
 - Live `/plans` returned the documented Free/Basic/Premium catalog through the gateway; live `/auth/current-user` correctly rejected missing authentication with HTTP 401.
-- Direct browser requests were confirmed blocked by backend CORS. The same-origin gateway resolved this without modifying the backend.
-- npm security audit after upgrading Next.js: zero reported vulnerabilities.
-- Desktop login/overview and mobile registration/billing screenshots reviewed. No mobile horizontal overflow at 390px.
+- The deployed backend readiness endpoint reported MongoDB up. Local S3 credentials passed a temporary object upload, readback, and deletion check. Stripe Test Mode catalog and portal settings matched the backend's configuration checks.
+- The frontend npm audit reported zero vulnerabilities. The employee editor was reviewed at desktop and 390px mobile widths.
 - Authenticated tenant mutations remain unverified against real accounts; no credentials were provided.
 
 ## Google authentication and registration
@@ -87,7 +85,7 @@ For a live check, try one new Google email and complete company details, then si
 
 The persistent lower-right chat widget integrates POST `/ai/chat`, GET `/ai/conversations?page=1&limit=20`, GET `/ai/conversations/:id`, and DELETE `/ai/conversations/:id`. Both roles have access to their own conversations. Model/provider configuration is server-controlled. If the backend returns `ai_disabled`, the page disables sending and explains that the service needs enabling; saved history remains readable. No API key is needed or accepted by this frontend. See `BACKEND_FEATURE_AUDIT.md` for the full feature comparison and deployment prerequisites.
 
-The chatbot opens over the current page, preserves its draft when minimized or during client navigation, and has an inline History view. The login screen shows a sign-in prompt. The former /dashboard/assistant route redirects to the dashboard with chat open. The visual refresh uses softer surfaces, rounded controls, lighter borders, and responsive spacing. Production build and nine browser tests passed after this update.
+The chatbot opens over the current page, preserves its draft when minimized or during client navigation, and has an inline History view. The login screen shows a sign-in prompt. The former /dashboard/assistant route redirects to the dashboard with chat open.
 
 ## Stripe return routes and backend setup
 

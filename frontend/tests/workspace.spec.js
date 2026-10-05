@@ -762,6 +762,53 @@ async function fixture(page, role = "owner", signedIn = true) {
     });
   });
 }
+test("owner views and updates an employee through the user detail API", async ({
+  page,
+}) => {
+  await fixture(page);
+  let employee = { ...member },
+    updatedBody,
+    detailReads = 0;
+  await page.route(`${api}/users?**`, (route) =>
+    route.fulfill({
+      json: { users: [owner, employee], total: 2, page: 1, take: 30 },
+    }),
+  );
+  await page.route(`${api}/users/${member._id}`, (route) => {
+    if (route.request().method() === "PATCH") {
+      updatedBody = route.request().postDataJSON();
+      employee = { ...employee, ...updatedBody };
+    } else detailReads++;
+    return route.fulfill({ json: employee });
+  });
+  await page.goto("/dashboard/employees");
+  await page.getByRole("button", { name: `Edit ${member.email}` }).click();
+  const dialog = page.getByRole("dialog", { name: "Employee details" });
+  await expect(dialog).toContainText(member.email);
+  await expect(dialog.getByLabel("Full name")).toHaveValue("Sam Lee");
+  expect(detailReads).toBeGreaterThan(0);
+  await page.screenshot({
+    path: "test-results/employee-detail-desktop.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await dialog.getByLabel("Full name").fill("Sam Rivera");
+  await dialog.getByRole("button", { name: "Save name" }).click();
+  expect(updatedBody).toEqual({ fullName: "Sam Rivera" });
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("Sam Rivera", { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: `Edit ${member.email}` }).click();
+  await expect(dialog).toBeVisible();
+  await page.screenshot({
+    path: "test-results/employee-detail-mobile.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  const bounds = await dialog.boundingBox();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+});
 test("file upload sends the chosen CSV and restricted employee access", async ({
   page,
 }) => {

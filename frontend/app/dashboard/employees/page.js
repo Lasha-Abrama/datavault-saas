@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Mail, Plus, RefreshCw, Trash2, Users } from "lucide-react";
+import { Mail, Pencil, Plus, RefreshCw, Trash2, Users } from "lucide-react";
 import { collection, request } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useResource } from "@/lib/hooks";
@@ -42,6 +42,7 @@ function EmployeeManagement() {
       [],
     );
   const [invite, setInvite] = useState(false),
+    [selectedUser, setSelectedUser] = useState(null),
     [confirm, setConfirm] = useState(null),
     [error, setError] = useState(null),
     [resending, setResending] = useState(null);
@@ -151,20 +152,29 @@ function EmployeeManagement() {
                       <td>{date(u.createdAt)}</td>
                       <td>
                         {u.role !== "company_owner" ? (
-                          <button
-                            className="icon-button danger-text"
-                            aria-label={`Delete ${u.email}`}
-                            onClick={() =>
-                              setConfirm({
-                                title: "Remove this employee?",
-                                description: `${u.email} will lose access to this workspace. This cannot be undone.`,
-                                path: `/users/${u._id}`,
-                                label: "Remove employee",
-                              })
-                            }
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          <div className="row-actions">
+                            <button
+                              className="icon-button"
+                              aria-label={`Edit ${u.email}`}
+                              onClick={() => setSelectedUser(u._id)}
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            <button
+                              className="icon-button danger-text"
+                              aria-label={`Delete ${u.email}`}
+                              onClick={() =>
+                                setConfirm({
+                                  title: "Remove this employee?",
+                                  description: `${u.email} will lose access to this workspace. This cannot be undone.`,
+                                  path: `/users/${u._id}`,
+                                  label: "Remove employee",
+                                })
+                              }
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         ) : (
                           <span className="muted small">Owner</span>
                         )}
@@ -256,6 +266,18 @@ function EmployeeManagement() {
       {invite && (
         <InviteDialog onClose={() => setInvite(false)} onChanged={reload} />
       )}{" "}
+      {selectedUser && (
+        <EmployeeDetail
+          key={selectedUser}
+          id={selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onSaved={() => {
+            users.reload();
+            setSelectedUser(null);
+            toast("Employee name updated");
+          }}
+        />
+      )}{" "}
       {confirm && (
         <Confirm
           {...confirm}
@@ -268,6 +290,66 @@ function EmployeeManagement() {
         />
       )}
     </>
+  );
+}
+function EmployeeDetail({ id, onClose, onSaved }) {
+  const employee = useResource(
+    (signal) => request(`/users/${id}`, { signal }),
+    [id],
+  );
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState(null);
+  return (
+    <Modal title="Employee details" onClose={onClose} busy={busy}>
+      {employee.loading ? (
+        <Loading label="Loading employee details" />
+      ) : employee.error ? (
+        <ErrorState error={employee.error} retry={employee.reload} />
+      ) : (
+        <form
+          className="form-stack"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const fullName = String(
+              new FormData(event.currentTarget).get("fullName") || "",
+            ).trim();
+            setBusy(true);
+            setError(null);
+            try {
+              await request(`/users/${id}`, {
+                method: "PATCH",
+                body: { fullName },
+              });
+              onSaved();
+            } catch (failure) {
+              setError(failure);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <p className="muted small">
+            {employee.data.email} · Employee · Joined{" "}
+            {date(employee.data.createdAt)}
+          </p>
+          <Alert>{error?.message}</Alert>
+          <Field
+            name="fullName"
+            label="Full name"
+            defaultValue={employee.data.fullName}
+            maxLength={100}
+            required
+            error={error?.fields?.fullName}
+          />
+          <div className="modal-actions">
+            <Button variant="secondary" type="button" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button busy={busy}>Save name</Button>
+          </div>
+        </form>
+      )}
+    </Modal>
   );
 }
 function InviteDialog({ onClose, onChanged }) {
