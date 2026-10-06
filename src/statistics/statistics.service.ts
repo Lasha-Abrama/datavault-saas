@@ -10,6 +10,7 @@ import {
   InvitationStatus,
 } from '../invitations/entities/employee-invitation.entity';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { PlanCode } from '../plans/plan.constants';
 
 @Injectable()
 export class StatisticsService {
@@ -55,7 +56,10 @@ export class StatisticsService {
     const uploadsUnlimited = plan.extraFilePriceCents !== null;
     const remainingIncludedUploads = Math.max(
       0,
-      billingSummary.includedUploadAllowance - billingSummary.successfulUploads,
+      billingSummary.includedUploadAllowance -
+        (plan.code === PlanCode.FREE
+          ? storedFiles
+          : billingSummary.successfulUploads),
     );
 
     return {

@@ -15,7 +15,7 @@ import {
 import { collection, request, upload } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useResource } from "@/lib/hooks";
-import { bytes, date, filterFiles } from "@/lib/utils";
+import { bytes, date, fileUsage, filterFiles } from "@/lib/utils";
 import {
   Alert,
   Button,
@@ -414,8 +414,7 @@ function UploadDialog({ users, onClose, onUploaded }) {
   const atLimit =
     subscription &&
     subscription.plan.extraFilePriceCents === null &&
-    subscription.billingPeriod.uploadedFiles >=
-      subscription.plan.includedFilesPerMonth;
+    fileUsage(subscription) >= subscription.plan.includedFilesPerMonth;
   return (
     <Modal title="Add a file to your vault" onClose={onClose} busy={busy}>
       <Alert>{error?.message}</Alert>
@@ -460,14 +459,17 @@ function UploadDialog({ users, onClose, onUploaded }) {
         )}
       </div>
       <p className="small muted">
-        {subscription?.billingPeriod.uploadedFiles ?? "—"} /{" "}
-        {subscription?.plan.includedFilesPerMonth ?? "—"} included monthly files
-        used.
+        {fileUsage(subscription) ?? "—"} /{" "}
+        {subscription?.plan.includedFilesPerMonth ?? "—"}{" "}
+        {subscription?.plan.code === "free"
+          ? "files stored. Deleting a file frees a slot."
+          : "included monthly uploads used."}
       </p>
       {atLimit && (
         <Alert>
-          Your plan’s monthly upload limit has been reached. Change your plan to
-          add more files.
+          {subscription?.plan.code === "free"
+            ? "Your vault is full. Delete a file or change your plan to add another."
+            : "Your plan’s monthly upload limit has been reached. Change your plan to add more files."}
         </Alert>
       )}
       <Permissions

@@ -23,6 +23,7 @@ describe('SubscriptionsService', () => {
   };
   const periodModel = { findOne: jest.fn() };
   const userModel = { countDocuments: jest.fn() };
+  const fileModel = { countDocuments: jest.fn() };
   const invitationModel = { countDocuments: jest.fn() };
   const plansService = {
     findOne: jest.fn((code: PlanCode) => PLAN_CATALOG[code]),
@@ -40,6 +41,7 @@ describe('SubscriptionsService', () => {
     plansService as never,
     billingService,
     connection as never,
+    fileModel as never,
   );
   const owner: AuthenticatedUser = {
     id: new Types.ObjectId().toString(),
@@ -49,6 +51,7 @@ describe('SubscriptionsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    fileModel.countDocuments.mockResolvedValue(8);
     subscriptionModel.findOne.mockResolvedValue(subscription);
     subscriptionModel.findOneAndUpdate.mockResolvedValue(subscription);
     periodModel.findOne.mockResolvedValue(null);
@@ -87,6 +90,7 @@ describe('SubscriptionsService', () => {
       plansService as never,
       billingService,
       connection as never,
+      fileModel as never,
       payments as never,
     );
     await managed.changePlan(owner, PlanCode.PREMIUM);
@@ -110,6 +114,7 @@ describe('SubscriptionsService', () => {
       companyId,
       plan: { code: PlanCode.BASIC },
       employeeCount: 2,
+      storedFiles: 8,
       monthlyPriceEstimateCents: 1000,
       billingSummary: {
         calculationBasis: 'current_plan_estimate_with_recorded_overage',

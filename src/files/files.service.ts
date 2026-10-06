@@ -63,7 +63,10 @@ export class FilesService {
     );
     if (!availability.allowed)
       throw new ForbiddenException({
-        message: 'The monthly file upload limit has been reached',
+        message:
+          availability.quotaBasis === 'stored_files'
+            ? 'The Free plan stored file limit has been reached. Delete a file to upload another.'
+            : 'The monthly file upload limit has been reached',
         reason: EntitlementDenialReason.FILE_LIMIT_REACHED,
         limit: availability.includedFilesPerMonth,
       });

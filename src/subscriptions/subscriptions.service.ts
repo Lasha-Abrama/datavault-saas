@@ -20,6 +20,7 @@ import { SubscriptionPeriod } from './entities/subscription-period.entity';
 import { Subscription } from './entities/subscription.entity';
 import { BillingService } from './billing.service';
 import { PaymentsService } from '../payments/payments.service';
+import { CompanyFile } from '../files/entities/company-file.entity';
 
 @Injectable()
 export class SubscriptionsService {
@@ -34,6 +35,7 @@ export class SubscriptionsService {
     private readonly plansService: PlansService,
     private readonly billingService: BillingService,
     @InjectConnection() private readonly connection: Connection,
+    @InjectModel('companyFile') private readonly fileModel: Model<CompanyFile>,
     @Optional() private readonly payments?: PaymentsService,
   ) {}
 
@@ -80,6 +82,10 @@ export class SubscriptionsService {
           employeeCount,
           at,
         );
+        const storedFiles = await this.fileModel.countDocuments(
+          { companyId },
+          { session },
+        );
 
         return {
           companyId: subscription.companyId,
@@ -92,6 +98,7 @@ export class SubscriptionsService {
             fileOverageCents: usage?.fileOverageCents ?? 0,
           },
           employeeCount,
+          storedFiles,
           monthlyPriceEstimateCents: billingSummary.totalAmountCents,
           billingSummary,
         };

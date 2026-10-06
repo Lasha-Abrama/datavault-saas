@@ -20,7 +20,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { request } from "@/lib/api";
 import { useResource } from "@/lib/hooks";
-import { initials } from "@/lib/utils";
+import { fileUsage, initials } from "@/lib/utils";
 import { Button, ErrorState, Loading, Logo, Progress } from "@/components/ui";
 import DataAtmosphere from "./data-atmosphere";
 import { paymentReturnPaths } from "@/lib/payments";
@@ -136,13 +136,20 @@ function AuthenticatedShell({ children }) {
             <span className="mini-dot" />
           </div>
           <p>
-            <strong>{subscription?.billingPeriod.uploadedFiles ?? "—"}</strong>{" "}
-            / {subscription?.plan.includedFilesPerMonth ?? "—"} files used
+            <strong>{fileUsage(subscription) ?? "—"}</strong> /{" "}
+            {subscription?.plan.includedFilesPerMonth ?? "—"}{" "}
+            {subscription?.plan.code === "free"
+              ? "files stored"
+              : "monthly uploads"}
           </p>
           <Progress
-            value={subscription?.billingPeriod.uploadedFiles || 0}
+            value={fileUsage(subscription) || 0}
             max={subscription?.plan.includedFilesPerMonth || 1}
-            label="Monthly file usage"
+            label={
+              subscription?.plan.code === "free"
+                ? "Stored file usage"
+                : "Monthly file usage"
+            }
           />
           <Link href="/dashboard/billing">
             {isAdmin ? "Manage your plan" : "View your plan"}{" "}

@@ -4,7 +4,7 @@ import { ArrowRight, Check, CreditCard, Layers3 } from "lucide-react";
 import { request } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useResource } from "@/lib/hooks";
-import { date, money } from "@/lib/utils";
+import { date, fileUsage, money } from "@/lib/utils";
 import {
   Alert,
   Badge,
@@ -52,6 +52,10 @@ export default function Billing() {
     workspace.reload();
   }
   const rank = { free: 0, basic: 1, premium: 2 };
+  const isFree = b?.plan.code === "free";
+  const usedFiles = isFree
+    ? fileUsage(workspace.subscription)
+    : b?.successfulUploads;
   return (
     <>
       <PageHeading
@@ -91,20 +95,24 @@ export default function Billing() {
             </div>
             <div className="billing-usage">
               <div className="between">
-                <h3>Monthly file usage</h3>
+                <h3>{isFree ? "Stored file usage" : "Monthly file usage"}</h3>
                 <strong>
-                  {b.successfulUploads} / {b.includedUploadAllowance}
+                  {usedFiles ?? "—"} / {b.includedUploadAllowance}
                 </strong>
               </div>
               <Progress
-                value={b.successfulUploads}
+                value={usedFiles || 0}
                 max={b.includedUploadAllowance}
-                label="Monthly file allowance"
+                label={
+                  isFree ? "Stored file allowance" : "Monthly file allowance"
+                }
               />
               <p>
-                {b.plan.code === "premium"
-                  ? "1,000 included files + $0.50 per additional file."
-                  : `${b.includedUploadAllowance} included files per billing period.`}
+                {isFree
+                  ? "10 stored files. Delete a file to free a slot."
+                  : b.plan.code === "premium"
+                    ? "1,000 included files + $0.50 per additional file."
+                    : `${b.includedUploadAllowance} included files per billing period.`}
               </p>
               <div className="between">
                 <span>Employees</span>
@@ -226,7 +234,9 @@ export default function Billing() {
                 </div>
                 <div className="plan-allowance">
                   <strong>{plan.includedFilesPerMonth.toLocaleString()}</strong>
-                  <span>files per month</span>
+                  <span>
+                    {plan.code === "free" ? "stored files" : "files per month"}
+                  </span>
                   <div
                     className={`allowance-ticks ticks-${plan.code}`}
                     aria-hidden="true"
@@ -306,7 +316,7 @@ export default function Billing() {
                 ? `Keep ${chosen.name}?`
                 : `Change to ${chosen.name}?`
           }
-          description={`${chosen.name} includes ${chosen.includedFilesPerMonth.toLocaleString()} files per month. ${chosen.code === "basic" ? "$5 per employee per month." : `${money(chosen.basePriceCents)} monthly base.`} ${assignmentMode ? "This is a workspace plan assignment; no payment is collected." : setup ? "You’ll continue to Stripe Checkout to save a payment method. Checkout does not collect a payment immediately. Return here to verify your subscription." : chosen.code === b?.plan.code ? "This requests keeping your current plan and clearing its scheduled change." : "No real charges are currently made. Downgrades take effect at the billing-period boundary; upgrades can take effect earlier. No prorated charge is applied."} Downgrades must fit your employees and pending invitations.`}
+          description={`${chosen.name} includes ${chosen.includedFilesPerMonth.toLocaleString()} ${chosen.code === "free" ? "stored files" : "files per month"}. ${chosen.code === "basic" ? "$5 per employee per month." : `${money(chosen.basePriceCents)} monthly base.`} ${assignmentMode ? "This is a workspace plan assignment; no payment is collected." : setup ? "You’ll continue to Stripe Checkout to save a payment method. Checkout does not collect a payment immediately. Return here to verify your subscription." : chosen.code === b?.plan.code ? "This requests keeping your current plan and clearing its scheduled change." : "No real charges are currently made. Downgrades take effect at the billing-period boundary; upgrades can take effect earlier. No prorated charge is applied."} Downgrades must fit your employees and pending invitations.`}
           label={setup ? "Continue to Stripe" : "Confirm plan change"}
           dangerous={false}
           onClose={() => setChosen(null)}

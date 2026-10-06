@@ -164,7 +164,7 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
       .overrideProvider(getModelToken('employeeInvitation'))
       .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
       .overrideProvider(getModelToken('companyFile'))
-      .useValue({})
+      .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
       .overrideProvider(getModelToken('platformAdmin'))
       .useValue({})
       .overrideProvider(getModelToken('adminAudit'))

@@ -1000,7 +1000,10 @@ describe('company files (e2e)', () => {
   });
 
   it('enforces Free and Basic hard limits and Premium overage', async () => {
-    seedPeriod(9);
+    for (let i = 0; i < 9; i++)
+      await upload(`existing-${i}.csv`, 'text/csv', Buffer.from('a,b')).expect(
+        201,
+      );
     await upload('free-last.csv', 'text/csv', Buffer.from('a,b')).expect(201);
     await upload('free-over.csv', 'text/csv', Buffer.from('a,b')).expect(403);
 
@@ -1067,6 +1070,47 @@ describe('company files (e2e)', () => {
     });
   });
 
+  it('frees a Free slot on deletion and allows uploading the tenth file again', async () => {
+    let lastFileId = '';
+    for (let i = 0; i < 10; i++) {
+      const uploaded = await upload(
+        `file-${i}.csv`,
+        'text/csv',
+        Buffer.from('a,b'),
+      ).expect(201);
+      lastFileId = (uploaded.body as { id: string }).id;
+    }
+    await upload('blocked.csv', 'text/csv', Buffer.from('a,b')).expect(403);
+    await request(app.getHttpServer())
+      .delete(`/files/${lastFileId}`)
+      .set(auth(ownerToken))
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/subscriptions/current')
+      .set(auth(ownerToken))
+      .expect(200)
+      .expect(
+        ({
+          body,
+        }: {
+          body: {
+            storedFiles: number;
+            billingPeriod: { uploadedFiles: number };
+          };
+        }) =>
+          expect(body).toMatchObject({
+            storedFiles: 9,
+            billingPeriod: { uploadedFiles: 10 },
+          }),
+      );
+    await upload('replacement.csv', 'text/csv', Buffer.from('a,b')).expect(201);
+    expect(files.size).toBe(10);
+    expect(periods.get(companyId.toString())?.uploadedFiles).toBe(11);
+    await upload('still-blocked.csv', 'text/csv', Buffer.from('a,b')).expect(
+      403,
+    );
+  });
+
   it('serializes a final Premium upload against an immediate downgrade', async () => {
     subscriptions.get(companyId.toString())!.planCode = PlanCode.PREMIUM;
     seedPeriod(1000);
@@ -1094,7 +1138,10 @@ describe('company files (e2e)', () => {
   });
 
   it('serializes concurrent final-slot uploads and cleans up the rejected object', async () => {
-    seedPeriod(9);
+    for (let i = 0; i < 9; i++)
+      await upload(`existing-${i}.csv`, 'text/csv', Buffer.from('a,b')).expect(
+        201,
+      );
     const responses = await Promise.all([
       upload('first.csv', 'text/csv', Buffer.from('a,b')),
       upload('second.csv', 'text/csv', Buffer.from('a,b')),
@@ -1102,8 +1149,8 @@ describe('company files (e2e)', () => {
     expect(responses.map((response) => response.status).sort()).toEqual([
       201, 403,
     ]);
-    expect(files.size).toBe(1);
-    expect(objects.size).toBe(1);
+    expect(files.size).toBe(10);
+    expect(objects.size).toBe(10);
     expect(periods.get(companyId.toString())?.uploadedFiles).toBe(10);
   });
 
@@ -1159,7 +1206,7 @@ describe('company files (e2e)', () => {
       .expect(400);
   });
 
-  it('streams downloads privately and applies uploader/owner deletion rules without refunding quota', async () => {
+  it('streams downloads privately and applies uploader/owner deletion rules while preserving upload history', async () => {
     const uploaded = await upload(
       '../safe.csv',
       'text/csv',

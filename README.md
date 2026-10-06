@@ -200,7 +200,7 @@ JWTs contain only the user id. Authentication reloads the user on every request 
 
 ## Plans and subscriptions
 
-The code-defined plan catalog is the source of truth and is idempotently synchronized to MongoDB on startup. Free includes 10 files per activation-anchored month and the owner only. Basic includes 100 files, up to 10 employees plus the owner, and costs $5 per employee per month. Premium includes 1,000 files, unlimited employees, costs $300 per month, and records $0.50 for each file over 1,000.
+The code-defined plan catalog is the source of truth and is idempotently synchronized to MongoDB on startup. Free includes space for 10 currently stored files and the owner only; deleting a file frees a slot for a replacement. Basic includes 100 files, up to 10 employees plus the owner, and costs $5 per employee per month. Premium includes 1,000 files, unlimited employees, costs $300 per month, and records $0.50 for each file over 1,000.
 
 Each company has one subscription. With `STRIPE_ENABLED=false`, plan changes take effect immediately, preserve the original activation/billing anchor, and do not reset the current period's usage. A downgrade is rejected when accepted employees plus live pending invitations exceed the target plan. Assignment mode requires no payments or provider states. Stripe-managed subscriptions follow the additional lifecycle below; disabling Stripe never silently bypasses their payment gate.
 
@@ -208,13 +208,13 @@ Each company has one subscription. With `STRIPE_ENABLED=false`, plan changes tak
 
 The estimate uses the current plan and current employee count because the assignment defines neither proration nor historical employee/plan charging rules. It is always labeled `current_plan_estimate_with_recorded_overage`, includes `planChangedInCurrentPeriod`, and is not an invoice or payment state. An immediate plan change retains the activation-day anchor and accumulated upload usage. Recorded Premium overage remains in the period after a downgrade, while the new plan controls future entitlements. A downgrade may therefore leave usage above the new file allowance; later uploads stay blocked until the next activation-anchored period. Period ends are exclusive, and day-29/30/31 anchors clamp to the last UTC day of short months before returning to the original day when possible.
 
-`EntitlementsService` is the internal boundary for employee and file limits. Invitation creation reserves a seat, and acceptance converts that reservation into an employee in a transaction. Free permits no employees, Basic permits 10 employees plus the owner, and Premium has no employee limit. Successful file uploads record metadata and monthly usage in the same transaction; deletion never refunds an upload count.
+`EntitlementsService` is the internal boundary for employee and file limits. Invitation creation reserves a seat, and acceptance converts that reservation into an employee in a transaction. Free permits no employees, Basic permits 10 employees plus the owner, and Premium has no employee limit. Successful file uploads record metadata and monthly usage in the same transaction; deletion preserves historical upload counts but frees a stored-file slot on Free.
 
 ## Bonus: company statistics dashboard
 
 `GET /statistics/current` is an additional read-only dashboard endpoint beyond the original assignment requirements. Activated owners and members receive statistics only for the company derived from their JWT. The response combines accepted employees, live pending invitations, current file-metadata counts by visibility, activation-anchored upload usage, current plan capacity, Premium overage, and the existing integer-cent billing calculation. It accepts no calculation or tenant inputs and sends `Cache-Control: private, no-store`.
 
-Currently stored files and current-period successful uploads are separate values: deleting a file removes its metadata from the stored count but does not reduce historical monthly upload usage. `remainingUploads` is finite for Free and Basic and `null` for Premium, where uploads beyond the included 1,000 are billed as overage. Employee limits use the same convention: `null` means unlimited.
+Currently stored files and current-period successful uploads are separate values: deleting a file removes its metadata from the stored count but does not reduce historical monthly upload usage. `remainingUploads` counts available stored-file slots for Free, remaining monthly uploads for Basic, and is `null` for Premium, where uploads beyond the included 1,000 are billed as overage. Employee limits use the same convention: `null` means unlimited.
 
 ## DataVault AI Assistant (OpenRouter)
 

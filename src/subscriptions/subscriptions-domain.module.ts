@@ -9,6 +9,7 @@ import { subscriptionSchema } from './entities/subscription.entity';
 import { SubscriptionsService } from './subscriptions.service';
 import { BillingService } from './billing.service';
 import { PaymentsDomainModule } from '../payments/payments-domain.module';
+import { companyFileSchema } from '../files/entities/company-file.entity';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { PaymentsDomainModule } from '../payments/payments-domain.module';
       { name: 'subscriptionPeriod', schema: subscriptionPeriodSchema },
       { name: 'user', schema: userSchema },
       { name: 'employeeInvitation', schema: employeeInvitationSchema },
+      { name: 'companyFile', schema: companyFileSchema },
     ]),
   ],
   providers: [BillingService, SubscriptionsService, EntitlementsService],

@@ -849,6 +849,60 @@ test("file upload sends the chosen CSV and restricted employee access", async ({
   expect(payload).toContain(JSON.stringify([member._id]));
 });
 
+test("Free allows a replacement upload with nine stored files and ten historical uploads", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route(`${api}/subscriptions/current`, (route) =>
+    route.fulfill({
+      json: {
+        plan: plans[0],
+        storedFiles: 9,
+        billingPeriod: { ...billing.billingPeriod, uploadedFiles: 10 },
+      },
+    }),
+  );
+  await page.goto("/dashboard/files");
+  await expect(page.locator(".sidebar-plan")).toContainText(
+    "9 / 10 files stored",
+  );
+  await page
+    .getByRole("button", { name: "Upload file", exact: true })
+    .first()
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Add a file to your vault" });
+  await expect(dialog).toContainText(
+    "9 / 10 files stored. Deleting a file frees a slot.",
+  );
+  await expect(
+    dialog.getByText("Your vault is full.", { exact: false }),
+  ).toHaveCount(0);
+  await page
+    .getByLabel("Choose a file")
+    .setInputFiles({
+      name: "replacement.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("a,b\n1,2"),
+    });
+  await expect(
+    dialog.getByRole("button", { name: "Upload file", exact: true }),
+  ).toBeEnabled();
+  await page.screenshot({
+    path: "test-results/free-file-slot-desktop.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    dialog.getByRole("button", { name: "Upload file", exact: true }),
+  ).toBeEnabled();
+  await page.screenshot({
+    path: "test-results/free-file-slot-mobile.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
 test("an unavailable storage provider keeps the upload dialog open with a clear retry path", async ({
   page,
 }) => {

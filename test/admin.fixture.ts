@@ -525,6 +525,7 @@ export async function adminFixture() {
     plans,
     billing,
     connection as unknown as Connection,
+    models.companyFile as never,
     { enabled: true } as never,
   );
   const jwt = new JwtService(platformAdminJwtOptions(config));

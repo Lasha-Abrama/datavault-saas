@@ -26,7 +26,7 @@ import { FileDetail, FileTable } from "@/components/files/files-workspace";
 import { useWorkspace } from "@/components/layout/shell";
 export default function Overview() {
   const { user, isAdmin } = useAuth(),
-    { subscription, company } = useWorkspace();
+    { subscription, company, reload: reloadWorkspace } = useWorkspace();
   const stats = useResource(
     (signal) => request("/statistics/current", { signal }),
     [],
@@ -42,7 +42,11 @@ export default function Overview() {
   );
   const [selected, setSelected] = useState(null);
   const s = stats.data,
-    usage = s?.files.currentBillingPeriod;
+    usage = s?.files.currentBillingPeriod,
+    isFree = s?.subscription.planCode === "free",
+    usedFiles = isFree
+      ? s.files.currentlyStored.total
+      : usage?.successfulUploads;
   return (
     <>
       <PageHeading
@@ -83,25 +87,35 @@ export default function Overview() {
                 </g>
               </svg>
               <div className="between">
-                <span className="eyebrow">THIS BILLING PERIOD</span>
+                <span className="eyebrow">
+                  {isFree ? "VAULT CAPACITY" : "THIS BILLING PERIOD"}
+                </span>
                 <Badge>{s.subscription.planName} plan</Badge>
               </div>
               <div className="usage-number">
-                {usage.successfulUploads.toLocaleString()}
+                {usedFiles.toLocaleString()}
                 <span>/ {usage.includedAllowance.toLocaleString()}</span>
               </div>
-              <h2>Files processed this period</h2>
+              <h2>
+                {isFree
+                  ? "Files stored in your vault"
+                  : "Files processed this period"}
+              </h2>
               <Progress
-                value={usage.successfulUploads}
+                value={usedFiles}
                 max={usage.includedAllowance}
                 label="Included file usage"
               />
               <div className="between small">
                 <span>
                   {usage.remainingIncludedUploads.toLocaleString()} included
-                  uploads remaining
+                  {isFree ? "file slots remaining" : "uploads remaining"}
                 </span>
-                <span>Renews {date(usage.endsAt)}</span>
+                <span>
+                  {isFree
+                    ? "Delete a file to free a slot"
+                    : `Renews ${date(usage.endsAt)}`}
+                </span>
               </div>
             </div>
             <div className="overview-side">
@@ -233,6 +247,7 @@ export default function Overview() {
           onChanged={() => {
             files.reload();
             stats.reload();
+            reloadWorkspace();
           }}
         />
       )}

@@ -297,7 +297,7 @@ describe('employee invitations (e2e)', () => {
       .overrideProvider(getModelToken('employeeInvitation'))
       .useValue(invitationModel)
       .overrideProvider(getModelToken('companyFile'))
-      .useValue({})
+      .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
       .overrideProvider(getModelToken('subscription'))
       .useValue(subscriptionModel)
       .overrideProvider(getModelToken('subscriptionPeriod'))

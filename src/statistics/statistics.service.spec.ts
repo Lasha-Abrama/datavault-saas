@@ -149,6 +149,19 @@ describe('StatisticsService', () => {
     expect(fileModel.countDocuments).toHaveBeenCalledWith({ companyId });
   });
 
+  it('reports available Free slots from stored files even after ten historical uploads', async () => {
+    subscriptionsService.getCurrent.mockResolvedValue(
+      subscriptionSnapshot(PlanCode.FREE, 0, 10, 0, 0),
+    );
+    counts({ pending: 0, total: 9, companyWide: 9, restricted: 0 });
+    await expect(service.getCurrent(companyId, now)).resolves.toMatchObject({
+      files: {
+        currentlyStored: { total: 9 },
+        currentBillingPeriod: { successfulUploads: 10, remainingUploads: 1 },
+      },
+    });
+  });
+
   it('shows Premium unlimited semantics, overage and historical uploads independently of stored files', async () => {
     subscriptionsService.getCurrent.mockResolvedValue(
       subscriptionSnapshot(PlanCode.PREMIUM, 12, 1004, 4, 30200),

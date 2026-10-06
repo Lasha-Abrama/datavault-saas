@@ -25,6 +25,7 @@ describe('EntitlementsService', () => {
     findOne: jest.fn(),
     findOneAndUpdate: jest.fn(),
   };
+  const fileModel = { countDocuments: jest.fn() };
   const connection = {
     transaction: jest.fn((work: (value: object) => unknown) => work(session)),
   };
@@ -36,10 +37,12 @@ describe('EntitlementsService', () => {
     invitationModel as never,
     periodModel as never,
     connection as never,
+    fileModel as never,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    fileModel.countDocuments.mockResolvedValue(0);
     subscriptionsService.paymentsEnabled = false;
     subscriptionsService.getSubscription.mockResolvedValue({
       planCode: PlanCode.FREE,
@@ -110,7 +113,7 @@ describe('EntitlementsService', () => {
   });
 
   it('allows the tenth Free file but rejects the eleventh', async () => {
-    periodModel.findOne.mockResolvedValue({ uploadedFiles: 9 });
+    fileModel.countDocuments.mockResolvedValue(9);
     await expect(
       service.checkFileUpload(
         companyId,
@@ -118,7 +121,7 @@ describe('EntitlementsService', () => {
         new Date('2026-01-21T00:00:00.000Z'),
       ),
     ).resolves.toMatchObject({ allowed: true, remainingIncludedFiles: 1 });
-    periodModel.findOne.mockResolvedValue({ uploadedFiles: 10 });
+    fileModel.countDocuments.mockResolvedValue(10);
     await expect(
       service.checkFileUpload(
         companyId,
@@ -155,6 +158,27 @@ describe('EntitlementsService', () => {
       allowed: false,
       includedFilesPerMonth: 100,
     });
+  });
+
+  it('allows a Free replacement despite historical uploads and rechecks stored capacity in the transaction', async () => {
+    periodModel.findOne.mockResolvedValue({ uploadedFiles: 25 });
+    fileModel.countDocuments.mockResolvedValue(9);
+    await expect(service.checkFileUpload(companyId)).resolves.toMatchObject({
+      allowed: true,
+      uploadedFiles: 25,
+      remainingIncludedFiles: 1,
+      quotaBasis: 'stored_files',
+    });
+    expect(fileModel.countDocuments).toHaveBeenCalledWith({ companyId });
+    await service.recordFileUploads(companyId);
+    expect(fileModel.countDocuments).toHaveBeenCalledWith(
+      { companyId },
+      { session },
+    );
+    fileModel.countDocuments.mockResolvedValue(10);
+    await expect(service.recordFileUploads(companyId)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it('quotes only the incremental Premium overage for a request', async () => {
@@ -199,7 +223,7 @@ describe('EntitlementsService', () => {
   });
 
   it('rejects hard-limit usage without updating the counter', async () => {
-    periodModel.findOne.mockResolvedValue({ uploadedFiles: 10 });
+    fileModel.countDocuments.mockResolvedValue(10);
     await expect(
       service.recordFileUploads(
         companyId,

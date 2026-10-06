@@ -328,7 +328,7 @@ describe('company registration and activation (e2e)', () => {
       .overrideProvider(getModelToken('employeeInvitation'))
       .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
       .overrideProvider(getModelToken('companyFile'))
-      .useValue({})
+      .useValue({ countDocuments: jest.fn().mockResolvedValue(0) })
       .overrideProvider(getModelToken('plan'))
       .useValue({ bulkWrite: jest.fn() })
       .overrideProvider(EmailSender)

@@ -7,6 +7,8 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model } from 'mongoose';
 import { Role } from '../enums/roles.enum';
 import { PlansService } from '../plans/plans.service';
+import { PlanCode } from '../plans/plan.constants';
+import { CompanyFile } from '../files/entities/company-file.entity';
 import { User } from '../users/entities/user.entity';
 import {
   EmployeeInvitation,
@@ -31,6 +33,7 @@ export class EntitlementsService {
     @InjectModel('subscriptionPeriod')
     private readonly periodModel: Model<SubscriptionPeriod>,
     @InjectConnection() private readonly connection: Connection,
+    @InjectModel('companyFile') private readonly fileModel: Model<CompanyFile>,
   ) {}
 
   async assertEmployeeCapacity(
@@ -104,7 +107,14 @@ export class EntitlementsService {
       startsAt: period.startsAt,
     });
     const uploadedFiles = usage?.uploadedFiles ?? 0;
-    const resultingFiles = uploadedFiles + quantity;
+    const storedFiles =
+      plan.code === PlanCode.FREE || target.code === PlanCode.FREE
+        ? await this.fileModel.countDocuments({ companyId })
+        : 0;
+    const usedFiles = plan.code === PlanCode.FREE ? storedFiles : uploadedFiles;
+    const resultingFiles = usedFiles + quantity;
+    const targetFiles =
+      (target.code === PlanCode.FREE ? storedFiles : uploadedFiles) + quantity;
     const excessFiles = Math.max(
       0,
       resultingFiles - plan.includedFilesPerMonth,
@@ -112,24 +122,26 @@ export class EntitlementsService {
     const allowed =
       (plan.extraFilePriceCents !== null || excessFiles === 0) &&
       (target.extraFilePriceCents !== null ||
-        resultingFiles <= target.includedFilesPerMonth);
+        targetFiles <= target.includedFilesPerMonth);
 
     return {
       allowed,
       reason: allowed ? null : EntitlementDenialReason.FILE_LIMIT_REACHED,
       planCode: plan.code,
       uploadedFiles,
+      quotaBasis:
+        plan.code === PlanCode.FREE ? 'stored_files' : 'monthly_uploads',
       requestedFiles: quantity,
       includedFilesPerMonth: plan.includedFilesPerMonth,
       remainingIncludedFiles: Math.max(
         0,
-        plan.includedFilesPerMonth - uploadedFiles,
+        plan.includedFilesPerMonth - usedFiles,
       ),
       additionalChargeCents:
         this.billingService.calculateAdditionalOverageCents(
           plan,
           uploadedFiles,
-          resultingFiles,
+          uploadedFiles + quantity,
         ),
       billingPeriod: period,
     };
@@ -186,17 +198,27 @@ export class EntitlementsService {
     );
     const uploadedFiles = usage?.uploadedFiles ?? 0;
     const resultingFiles = uploadedFiles + quantity;
-    const resultingExcess = Math.max(
-      0,
-      resultingFiles - plan.includedFilesPerMonth,
-    );
+    // The subscription lock serializes uploads; count stored files in the same
+    // transaction as metadata creation so concurrent uploads cannot exceed Free.
+    const storedFiles =
+      plan.code === PlanCode.FREE || target.code === PlanCode.FREE
+        ? await this.fileModel.countDocuments({ companyId }, { session })
+        : 0;
+    const planFiles =
+      (plan.code === PlanCode.FREE ? storedFiles : uploadedFiles) + quantity;
+    const targetFiles =
+      (target.code === PlanCode.FREE ? storedFiles : uploadedFiles) + quantity;
     if (
-      (plan.extraFilePriceCents === null && resultingExcess > 0) ||
+      (plan.extraFilePriceCents === null &&
+        planFiles > plan.includedFilesPerMonth) ||
       (target.extraFilePriceCents === null &&
-        resultingFiles > target.includedFilesPerMonth)
+        targetFiles > target.includedFilesPerMonth)
     )
       throw new ForbiddenException({
-        message: `The ${plan.name} monthly file limit has been reached`,
+        message:
+          plan.code === PlanCode.FREE
+            ? 'The Free plan stored file limit has been reached. Delete a file to upload another.'
+            : `The ${plan.name} monthly file limit has been reached`,
         reason: EntitlementDenialReason.FILE_LIMIT_REACHED,
         limit: plan.includedFilesPerMonth,
       });
