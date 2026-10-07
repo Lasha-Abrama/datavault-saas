@@ -22,6 +22,7 @@ describe('enabled payment domain bootstrap', () => {
         'subscriptionPeriod',
         'user',
         'employeeInvitation',
+        'companyFile',
         'stripeEvent',
         'stripeUsage',
       ].map((name) => [name, { init: jest.fn(() => indexBuild) }]),

@@ -513,16 +513,38 @@ describe('Stripe Test Mode HTTP/security (e2e, mocked Stripe)', () => {
     expect(f.api.subscriptionSchedules.create).not.toHaveBeenCalled();
   });
 
-  it('queues cancellation without granting Free early', async () => {
+  it('confirms immediate cancellation before granting Free', async () => {
     await f.activate(PlanCode.BASIC);
     await request(app.getHttpServer())
       .post('/payments/cancel')
       .set(auth(ownerToken))
       .send({})
       .expect(201);
-    expect(f.sub.planCode).toBe(PlanCode.BASIC);
-    expect(f.sub.pendingPlanCode).toBe(PlanCode.FREE);
-    expect(f.sub.stripeCancelAtPeriodEnd).toBe(true);
+    expect(f.sub.planCode).toBe(PlanCode.FREE);
+    expect(f.sub.pendingPlanCode).toBeUndefined();
+    expect(f.sub.stripeCancelAtPeriodEnd).toBe(false);
+    expect(f.api.subscriptions.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a safe file-limit reason and allows retry after deleting an extra stored file', async () => {
+    await f.activate();
+    for (let i = 0; i < 11; i++) f.files.push({ companyId: f.sub.companyId });
+    await request(app.getHttpServer())
+      .post('/payments/cancel')
+      .set(auth(ownerToken))
+      .send({})
+      .expect(409)
+      .expect(({ body }: { body: { code: string } }) =>
+        expect(body.code).toBe('plan_file_limit'),
+      );
+    expect(f.api.subscriptions.cancel).not.toHaveBeenCalled();
+    f.files.pop();
+    await request(app.getHttpServer())
+      .post('/payments/cancel')
+      .set(auth(ownerToken))
+      .send({})
+      .expect(201);
+    expect(f.sub.planCode).toBe(PlanCode.FREE);
   });
 
   it('returns safe failures and keeps failed webhook delivery retryable', async () => {

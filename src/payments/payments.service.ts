@@ -14,6 +14,7 @@ import { ClientSession, Connection, HydratedDocument, Model } from 'mongoose';
 import Stripe from 'stripe';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { Role } from '../enums/roles.enum';
+import { CompanyFile } from '../files/entities/company-file.entity';
 import {
   EmployeeInvitation,
   InvitationStatus,
@@ -69,6 +70,7 @@ export class PaymentsService {
     @InjectModel('stripeEvent') private readonly events: Model<StripeEvent>,
     @InjectModel('stripeUsage') private readonly usages: Model<StripeUsage>,
     @InjectConnection() private readonly connection: Connection,
+    @InjectModel('companyFile') private readonly files: Model<CompanyFile>,
   ) {}
 
   private transaction<T>(work: (session: ClientSession) => Promise<T>) {
@@ -177,25 +179,31 @@ export class PaymentsService {
       },
       options,
     );
-    const usage = await this.periods.findOne(
-      {
-        companyId: subscription.companyId,
-        startsAt: billingPeriod(subscription.activatedAt, at).startsAt,
-      },
-      null,
+    if (plan.maxEmployees !== null && employees + pending > plan.maxEmployees)
+      throw new ConflictException({
+        code: 'plan_employee_limit',
+        message:
+          'Accepted employees and pending invitations exceed the target plan limit',
+        planCode: code,
+        limit: plan.maxEmployees,
+        employees,
+        pendingInvitations: pending,
+      });
+    const fileCount = await this.files.countDocuments(
+      { companyId: subscription.companyId },
       options,
     );
-    if (plan.maxEmployees !== null && employees + pending > plan.maxEmployees)
-      throw new ConflictException(
-        'Accepted employees and pending invitations exceed the target plan limit',
-      );
     if (
       plan.extraFilePriceCents === null &&
-      (usage?.uploadedFiles ?? 0) > plan.includedFilesPerMonth
+      fileCount > plan.includedFilesPerMonth
     )
-      throw new ConflictException(
-        'Current-period uploads exceed the target plan limit',
-      );
+      throw new ConflictException({
+        code: 'plan_file_limit',
+        message: 'Stored files exceed the target plan limit',
+        planCode: code,
+        limit: plan.includedFilesPerMonth,
+        storedFiles: fileCount,
+      });
     return employees;
   }
 
@@ -337,7 +345,12 @@ export class PaymentsService {
           await this.update(
             subscription,
             token,
-            { paymentAccess: PaymentAccess.SUSPENDED },
+            {
+              paymentAccess:
+                subscription.planCode === PlanCode.FREE
+                  ? subscription.paymentAccess
+                  : PaymentAccess.SUSPENDED,
+            },
             undefined,
             [
               'stripeSubscriptionId',
@@ -539,21 +552,26 @@ export class PaymentsService {
           if (
             subscription.pendingPlanCode &&
             subscription.pendingPlanCode !== code &&
-            code !== subscription.planCode
+            code !== subscription.planCode &&
+            code !== PlanCode.FREE
           )
             throw new ConflictException(
               'Resolve the queued plan change before requesting another target',
             );
-          if (subscription.pendingPlanCode !== code)
+          if (
+            subscription.pendingPlanCode !== code ||
+            (code === PlanCode.FREE && subscription.stripePlanConfirmed)
+          )
             await this.update(
               subscription,
               token,
               {
                 pendingPlanCode: code,
-                pendingPlanAt: billingPeriod(
-                  subscription.activatedAt,
-                  new Date(),
-                ).endsAt,
+                pendingPlanAt:
+                  code === PlanCode.FREE
+                    ? new Date()
+                    : billingPeriod(subscription.activatedAt, new Date())
+                        .endsAt,
                 stripeChangeOperation: randomUUID(),
                 stripePlanConfirmed: false,
               },
@@ -631,12 +649,7 @@ export class PaymentsService {
         'stripeScheduleId',
       ]);
     const downgrade =
-      target === PlanCode.FREE ||
-      (currentPlan === PlanCode.PREMIUM && target === PlanCode.BASIC);
-    if (target === PlanCode.FREE && remote.cancel_at_period_end) {
-      await this.update(subscription, token, { stripePlanConfirmed: true });
-      return;
-    }
+      currentPlan === PlanCode.PREMIUM && target === PlanCode.BASIC;
     if (
       downgrade &&
       subscription.pendingPlanAt &&
@@ -658,13 +671,9 @@ export class PaymentsService {
           {},
           { idempotencyKey: `${key}-release` },
         );
-      await api.subscriptions.update(
+      await api.subscriptions.cancel(
         remote.id,
-        {
-          cancel_at_period_end: true,
-          billing_cycle_anchor: 'unchanged',
-          proration_behavior: 'none',
-        },
+        { invoice_now: false, prorate: false },
         { idempotencyKey: key },
       );
       await this.update(subscription, token, {}, undefined, [

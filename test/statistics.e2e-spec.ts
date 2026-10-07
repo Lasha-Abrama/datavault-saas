@@ -349,7 +349,7 @@ describe('company statistics dashboard (e2e)', () => {
           expect(body.files.currentBillingPeriod).toMatchObject({
             successfulUploads: 7,
             includedAllowance: 100,
-            remainingUploads: 93,
+            remainingUploads: 97,
           });
           expect(body.billing).toMatchObject({
             employeeChargeCents: 1000,

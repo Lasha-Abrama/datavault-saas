@@ -43,10 +43,7 @@ export default function Overview() {
   const [selected, setSelected] = useState(null);
   const s = stats.data,
     usage = s?.files.currentBillingPeriod,
-    isFree = s?.subscription.planCode === "free",
-    usedFiles = isFree
-      ? s.files.currentlyStored.total
-      : usage?.successfulUploads;
+    usedFiles = s?.files.currentlyStored.total;
   return (
     <>
       <PageHeading
@@ -87,20 +84,14 @@ export default function Overview() {
                 </g>
               </svg>
               <div className="between">
-                <span className="eyebrow">
-                  {isFree ? "VAULT CAPACITY" : "THIS BILLING PERIOD"}
-                </span>
+                <span className="eyebrow">VAULT CAPACITY</span>
                 <Badge>{s.subscription.planName} plan</Badge>
               </div>
               <div className="usage-number">
                 {usedFiles.toLocaleString()}
                 <span>/ {usage.includedAllowance.toLocaleString()}</span>
               </div>
-              <h2>
-                {isFree
-                  ? "Files stored in your vault"
-                  : "Files processed this period"}
-              </h2>
+              <h2>Files stored in your vault</h2>
               <Progress
                 value={usedFiles}
                 max={usage.includedAllowance}
@@ -109,13 +100,9 @@ export default function Overview() {
               <div className="between small">
                 <span>
                   {usage.remainingIncludedUploads.toLocaleString()} included
-                  {isFree ? "file slots remaining" : "uploads remaining"}
+                  file slots remaining
                 </span>
-                <span>
-                  {isFree
-                    ? "Delete a file to free a slot"
-                    : `Renews ${date(usage.endsAt)}`}
-                </span>
+                <span>Delete a file to free a slot</span>
               </div>
             </div>
             <div className="overview-side">

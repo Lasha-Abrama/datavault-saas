@@ -15,6 +15,7 @@ export enum BillingInterval {
 export interface PlanDefinition {
   code: PlanCode;
   name: string;
+  // Legacy API field name: the allowance applies to currently stored files.
   includedFilesPerMonth: number;
   // Employees are company members; the company owner is not a billable employee.
   maxEmployees: number | null;

@@ -3443,3 +3443,9 @@ dialog {
     padding-bottom: 50px;
   }
 }
+
+.downgrade-options {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}

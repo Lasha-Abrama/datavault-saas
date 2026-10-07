@@ -7,7 +7,6 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model } from 'mongoose';
 import { Role } from '../enums/roles.enum';
 import { PlansService } from '../plans/plans.service';
-import { PlanCode } from '../plans/plan.constants';
 import { CompanyFile } from '../files/entities/company-file.entity';
 import { User } from '../users/entities/user.entity';
 import {
@@ -107,14 +106,9 @@ export class EntitlementsService {
       startsAt: period.startsAt,
     });
     const uploadedFiles = usage?.uploadedFiles ?? 0;
-    const storedFiles =
-      plan.code === PlanCode.FREE || target.code === PlanCode.FREE
-        ? await this.fileModel.countDocuments({ companyId })
-        : 0;
-    const usedFiles = plan.code === PlanCode.FREE ? storedFiles : uploadedFiles;
-    const resultingFiles = usedFiles + quantity;
-    const targetFiles =
-      (target.code === PlanCode.FREE ? storedFiles : uploadedFiles) + quantity;
+    const storedFiles = await this.fileModel.countDocuments({ companyId });
+    const resultingFiles = storedFiles + quantity;
+    const targetFiles = resultingFiles;
     const excessFiles = Math.max(
       0,
       resultingFiles - plan.includedFilesPerMonth,
@@ -129,19 +123,18 @@ export class EntitlementsService {
       reason: allowed ? null : EntitlementDenialReason.FILE_LIMIT_REACHED,
       planCode: plan.code,
       uploadedFiles,
-      quotaBasis:
-        plan.code === PlanCode.FREE ? 'stored_files' : 'monthly_uploads',
+      quotaBasis: 'stored_files',
       requestedFiles: quantity,
       includedFilesPerMonth: plan.includedFilesPerMonth,
       remainingIncludedFiles: Math.max(
         0,
-        plan.includedFilesPerMonth - usedFiles,
+        plan.includedFilesPerMonth - storedFiles,
       ),
       additionalChargeCents:
         this.billingService.calculateAdditionalOverageCents(
           plan,
-          uploadedFiles,
-          uploadedFiles + quantity,
+          storedFiles,
+          resultingFiles,
         ),
       billingPeriod: period,
     };
@@ -198,16 +191,13 @@ export class EntitlementsService {
     );
     const uploadedFiles = usage?.uploadedFiles ?? 0;
     const resultingFiles = uploadedFiles + quantity;
-    // The subscription lock serializes uploads; count stored files in the same
-    // transaction as metadata creation so concurrent uploads cannot exceed Free.
-    const storedFiles =
-      plan.code === PlanCode.FREE || target.code === PlanCode.FREE
-        ? await this.fileModel.countDocuments({ companyId }, { session })
-        : 0;
-    const planFiles =
-      (plan.code === PlanCode.FREE ? storedFiles : uploadedFiles) + quantity;
-    const targetFiles =
-      (target.code === PlanCode.FREE ? storedFiles : uploadedFiles) + quantity;
+    // Serialize the stored count with metadata creation for every plan.
+    const storedFiles = await this.fileModel.countDocuments(
+      { companyId },
+      { session },
+    );
+    const planFiles = storedFiles + quantity;
+    const targetFiles = planFiles;
     if (
       (plan.extraFilePriceCents === null &&
         planFiles > plan.includedFilesPerMonth) ||
@@ -215,18 +205,15 @@ export class EntitlementsService {
         targetFiles > target.includedFilesPerMonth)
     )
       throw new ForbiddenException({
-        message:
-          plan.code === PlanCode.FREE
-            ? 'The Free plan stored file limit has been reached. Delete a file to upload another.'
-            : `The ${plan.name} monthly file limit has been reached`,
+        message: `The stored file limit has been reached. Delete a file to upload another.`,
         reason: EntitlementDenialReason.FILE_LIMIT_REACHED,
         limit: plan.includedFilesPerMonth,
       });
     const additionalOverageCents =
       this.billingService.calculateAdditionalOverageCents(
         plan,
-        uploadedFiles,
-        resultingFiles,
+        storedFiles,
+        storedFiles + quantity,
       );
 
     if (subscription.stripeManaged)

@@ -6,6 +6,7 @@ import {
   MongooseModule,
 } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
+import { companyFileSchema } from '../files/entities/company-file.entity';
 import { employeeInvitationSchema } from '../invitations/entities/employee-invitation.entity';
 import { PlansModule } from '../plans/plans.module';
 import { subscriptionPeriodSchema } from '../subscriptions/entities/subscription-period.entity';
@@ -23,6 +24,7 @@ import { StripeClientService } from './stripe-client.service';
       { name: 'subscription', schema: subscriptionSchema },
       { name: 'subscriptionPeriod', schema: subscriptionPeriodSchema },
       { name: 'user', schema: userSchema },
+      { name: 'companyFile', schema: companyFileSchema },
       { name: 'employeeInvitation', schema: employeeInvitationSchema },
     ]),
   ],

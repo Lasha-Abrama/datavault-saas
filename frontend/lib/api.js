@@ -85,6 +85,48 @@ export class ApiError extends Error {
           "This billing action is not available for the selected plan. Refresh your subscription and try again.";
       }
     }
+    if (
+      status === 409 &&
+      (context.startsWith("/payments/") ||
+        context === "/subscriptions/current" ||
+        context === "/subscriptions/downgrade-cleanup")
+    ) {
+      const target =
+        { free: "Free", basic: "Basic", premium: "Premium" }[body?.planCode] ||
+        "The selected plan";
+      const limit =
+        Number.isSafeInteger(body?.limit) && body.limit >= 0
+          ? body.limit
+          : null;
+      if (this.code === "plan_file_limit") {
+        const count =
+          Number.isSafeInteger(body?.storedFiles) && body.storedFiles >= 0
+            ? ` You currently have ${body.storedFiles}.`
+            : "";
+        this.message = `${target}${limit !== null ? ` allows ${limit} stored files` : " has a stored-file limit"}.${count} Choose which files to keep, delete extras, and retry. Nothing is removed automatically.`;
+      } else if (this.code === "plan_employee_limit") {
+        this.message = `${target}${limit !== null ? ` allows ${limit} employees and pending invitations in total` : " has an employee limit"}. Remove extra employees and revoke pending invitations before retrying. Nothing is removed automatically.`;
+      }
+    }
+    if (
+      context === "/subscriptions/downgrade-cleanup" &&
+      ["plan_file_limit", "plan_employee_limit"].includes(this.code)
+    )
+      this.message = this.message.replace(
+        "Nothing is removed automatically.",
+        "Some confirmed cleanup may already have completed.",
+      );
+    if (context === "/subscriptions/downgrade-cleanup") {
+      if (this.code === "cleanup_payment_setup")
+        this.message =
+          "Connect your current paid plan’s billing first, or remove extras manually and start Checkout for the lower plan. Nothing was removed.";
+      else if (this.code === "cleanup_preview_changed")
+        this.message =
+          "Your workspace changed. Close this dialog and review a fresh cleanup preview before confirming again. Some earlier cleanup may already have completed.";
+      else if (status === 503)
+        this.message =
+          "Cleanup or billing did not finish. Some items may already have been permanently removed. Refresh files, employees, and payment status before retrying.";
+    }
     if (context === "/files" && status === 503)
       this.message =
         "File storage is temporarily unavailable. Refresh the file list before trying again.";

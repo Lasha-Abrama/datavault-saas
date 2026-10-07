@@ -227,6 +227,7 @@ export function paymentFixture() {
   ];
   const invitations: Row[] = [];
   const periods: Row[] = [];
+  const files: Row[] = [];
   const usages: Row[] = [];
   const events: Row[] = [];
   const userModel = memory(users);
@@ -316,6 +317,12 @@ export function paymentFixture() {
         } as unknown as Stripe.Subscription;
         remote.set(s.id, s);
         return Promise.resolve(s);
+      }),
+      cancel: jest.fn((id: string) => {
+        const subscription = remote.get(id)!;
+        subscription.status = 'canceled';
+        subscription.cancel_at_period_end = false;
+        return Promise.resolve(subscription);
       }),
       retrieve: jest.fn((id: string) => Promise.resolve(remote.get(id)!)),
       update: jest.fn((id: string, params: Stripe.SubscriptionUpdateParams) => {
@@ -481,6 +488,7 @@ export function paymentFixture() {
     eventModel as never,
     usageModel as never,
     { transaction } as unknown as Connection,
+    memory(files) as never,
   );
   const event = (
     type = 'customer.subscription.updated',
@@ -547,6 +555,7 @@ export function paymentFixture() {
     users,
     invitations,
     periods,
+    files,
     usages,
     events,
     sessions,

@@ -580,6 +580,31 @@ describe('company files (e2e)', () => {
     });
   };
 
+  const seedStoredFiles = (count: number) => {
+    while (files.size < count) {
+      const id = new Types.ObjectId();
+      const storageKey = `companies/${companyId.toString()}/files/${id.toString()}.csv`;
+      files.set(id.toString(), {
+        _id: id,
+        companyId: companyId.toString(),
+        uploaderId: memberId.toString(),
+        originalFilename: `${id.toString()}.csv`,
+        storageKey,
+        fileType: CompanyFileType.CSV,
+        mimeType: 'text/csv',
+        size: 3,
+        visibility: CompanyFileVisibility.COMPANY_WIDE,
+        restrictedUserIds: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      objects.set(storageKey, {
+        body: Buffer.from('a,b'),
+        contentType: 'text/csv',
+      });
+    }
+  };
+
   const seedPeriod = (uploadedFiles: number) => {
     const subscription = subscriptions.get(companyId.toString())!;
     const period = billingPeriod(subscription.activatedAt, new Date());
@@ -999,6 +1024,40 @@ describe('company files (e2e)', () => {
     expect(objects.size).toBe(0);
   });
 
+  it('protects cleanup previews and confirmation with owner authorization and strict input validation', async () => {
+    await request(app.getHttpServer())
+      .post('/subscriptions/downgrade-preview')
+      .set(auth(memberToken))
+      .send({ planCode: 'free' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/subscriptions/downgrade-cleanup')
+      .set(auth(memberToken))
+      .send({ planCode: 'free', previewToken: 'a'.repeat(64) })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/subscriptions/downgrade-preview')
+      .set(auth(ownerToken))
+      .send({ planCode: 'free', companyId: otherCompanyId.toString() })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/subscriptions/downgrade-cleanup')
+      .set(auth(ownerToken))
+      .send({ planCode: 'free' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/subscriptions/downgrade-cleanup')
+      .set(auth(ownerToken))
+      .send({ planCode: 'free', previewToken: 'invalid' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/subscriptions/downgrade-preview')
+      .set(auth(ownerToken))
+      .send({ planCode: 'premium' })
+      .expect(409);
+    expect(files.size).toBe(0);
+  });
+
   it('enforces Free and Basic hard limits and Premium overage', async () => {
     for (let i = 0; i < 9; i++)
       await upload(`existing-${i}.csv`, 'text/csv', Buffer.from('a,b')).expect(
@@ -1009,11 +1068,13 @@ describe('company files (e2e)', () => {
 
     subscriptions.get(companyId.toString())!.planCode = PlanCode.BASIC;
     periods.get(companyId.toString())!.uploadedFiles = 99;
+    seedStoredFiles(99);
     await upload('basic-last.csv', 'text/csv', Buffer.from('a,b')).expect(201);
     await upload('basic-over.csv', 'text/csv', Buffer.from('a,b')).expect(403);
 
     subscriptions.get(companyId.toString())!.planCode = PlanCode.PREMIUM;
     periods.get(companyId.toString())!.uploadedFiles = 999;
+    seedStoredFiles(999);
     await upload('premium-1000.csv', 'text/csv', Buffer.from('a,b')).expect(
       201,
     );
@@ -1051,14 +1112,19 @@ describe('company files (e2e)', () => {
       .patch('/subscriptions/current')
       .set(auth(ownerToken))
       .send({ planCode: PlanCode.BASIC })
-      .expect(200)
-      .expect(
-        ({
-          body,
-        }: {
-          body: { billingSummary: { totalAmountCents: number } };
-        }) => expect(body.billingSummary.totalAmountCents).toBe(1550),
-      );
+      .expect(409);
+    // The owner chooses which 100 files to retain; historical usage is unchanged.
+    const extraIds = [...files.keys()].slice(100);
+    for (const id of extraIds) {
+      const file = files.get(id)!;
+      objects.delete(file.storageKey);
+      files.delete(id);
+    }
+    await request(app.getHttpServer())
+      .patch('/subscriptions/current')
+      .set(auth(ownerToken))
+      .send({ planCode: PlanCode.BASIC })
+      .expect(200);
     await upload(
       'blocked-after-downgrade.csv',
       'text/csv',
@@ -1070,50 +1136,66 @@ describe('company files (e2e)', () => {
     });
   });
 
-  it('frees a Free slot on deletion and allows uploading the tenth file again', async () => {
-    let lastFileId = '';
-    for (let i = 0; i < 10; i++) {
-      const uploaded = await upload(
-        `file-${i}.csv`,
-        'text/csv',
-        Buffer.from('a,b'),
-      ).expect(201);
-      lastFileId = (uploaded.body as { id: string }).id;
-    }
-    await upload('blocked.csv', 'text/csv', Buffer.from('a,b')).expect(403);
-    await request(app.getHttpServer())
-      .delete(`/files/${lastFileId}`)
-      .set(auth(ownerToken))
-      .expect(200);
-    await request(app.getHttpServer())
-      .get('/subscriptions/current')
-      .set(auth(ownerToken))
-      .expect(200)
-      .expect(
-        ({
-          body,
-        }: {
-          body: {
-            storedFiles: number;
-            billingPeriod: { uploadedFiles: number };
-          };
-        }) =>
-          expect(body).toMatchObject({
-            storedFiles: 9,
-            billingPeriod: { uploadedFiles: 10 },
-          }),
+  it.each([PlanCode.FREE, PlanCode.BASIC, PlanCode.PREMIUM])(
+    'deleting a %s file frees capacity for a replacement',
+    async (code) => {
+      subscriptions.get(companyId.toString())!.planCode = code;
+      const limit =
+        code === PlanCode.FREE ? 10 : code === PlanCode.BASIC ? 100 : 1000;
+      seedStoredFiles(limit - 1);
+      seedPeriod(limit - 1);
+      let lastFileId = '';
+      for (let i = 0; i < 1; i++) {
+        const uploaded = await upload(
+          `file-${i}.csv`,
+          'text/csv',
+          Buffer.from('a,b'),
+        ).expect(201);
+        lastFileId = (uploaded.body as { id: string }).id;
+      }
+      if (code !== PlanCode.PREMIUM)
+        await upload('blocked.csv', 'text/csv', Buffer.from('a,b')).expect(403);
+      await request(app.getHttpServer())
+        .delete(`/files/${lastFileId}`)
+        .set(auth(ownerToken))
+        .expect(200);
+      await request(app.getHttpServer())
+        .get('/subscriptions/current')
+        .set(auth(ownerToken))
+        .expect(200)
+        .expect(
+          ({
+            body,
+          }: {
+            body: {
+              storedFiles: number;
+              billingPeriod: { uploadedFiles: number };
+            };
+          }) =>
+            expect(body).toMatchObject({
+              storedFiles: limit - 1,
+              billingPeriod: { uploadedFiles: limit },
+            }),
+        );
+      await upload('replacement.csv', 'text/csv', Buffer.from('a,b')).expect(
+        201,
       );
-    await upload('replacement.csv', 'text/csv', Buffer.from('a,b')).expect(201);
-    expect(files.size).toBe(10);
-    expect(periods.get(companyId.toString())?.uploadedFiles).toBe(11);
-    await upload('still-blocked.csv', 'text/csv', Buffer.from('a,b')).expect(
-      403,
-    );
-  });
+      expect(files.size).toBe(limit);
+      expect(periods.get(companyId.toString())?.uploadedFiles).toBe(limit + 1);
+      expect(periods.get(companyId.toString())?.fileOverageCents).toBe(0);
+      if (code !== PlanCode.PREMIUM)
+        await upload(
+          'still-blocked.csv',
+          'text/csv',
+          Buffer.from('a,b'),
+        ).expect(403);
+    },
+  );
 
   it('serializes a final Premium upload against an immediate downgrade', async () => {
     subscriptions.get(companyId.toString())!.planCode = PlanCode.PREMIUM;
     seedPeriod(1000);
+    seedStoredFiles(99);
 
     const [uploadResponse, downgradeResponse] = await Promise.all([
       upload('plan-race.csv', 'text/csv', Buffer.from('a,b')),
@@ -1132,9 +1214,7 @@ describe('company files (e2e)', () => {
     expect(period.uploadedFiles).toBe(
       uploadResponse.status === 201 ? 1001 : 1000,
     );
-    expect(period.fileOverageCents).toBe(
-      uploadResponse.status === 201 ? 50 : 0,
-    );
+    expect(period.fileOverageCents).toBe(0);
   });
 
   it('serializes concurrent final-slot uploads and cleans up the rejected object', async () => {

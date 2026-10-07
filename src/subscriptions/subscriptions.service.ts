@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -141,9 +142,29 @@ export class SubscriptionsService {
         plan.maxEmployees !== null &&
         employeeCount + pendingInvitationCount > plan.maxEmployees
       )
-        throw new ForbiddenException(
-          `The ${plan.name} plan supports at most ${plan.maxEmployees} employees and pending invitations`,
-        );
+        throw new ConflictException({
+          code: 'plan_employee_limit',
+          message: `The ${plan.name} plan supports at most ${plan.maxEmployees} employees and pending invitations`,
+          planCode,
+          limit: plan.maxEmployees,
+          employees: employeeCount,
+          pendingInvitations: pendingInvitationCount,
+        });
+      const storedFiles = await this.fileModel.countDocuments(
+        { companyId: actor.companyId },
+        { session },
+      );
+      if (
+        plan.extraFilePriceCents === null &&
+        storedFiles > plan.includedFilesPerMonth
+      )
+        throw new ConflictException({
+          code: 'plan_file_limit',
+          message: 'Stored files exceed the target plan limit',
+          planCode,
+          limit: plan.includedFilesPerMonth,
+          storedFiles,
+        });
       if (subscription.planCode === planCode) return;
 
       await this.subscriptionModel.findOneAndUpdate(

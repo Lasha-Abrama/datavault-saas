@@ -145,6 +145,20 @@ describe('SubscriptionsService', () => {
     });
   });
 
+  it.each([PlanCode.FREE, PlanCode.BASIC])(
+    'requires manual file cleanup before changing to %s',
+    async (code) => {
+      userModel.countDocuments.mockResolvedValue(0);
+      const limit = PLAN_CATALOG[code].includedFilesPerMonth;
+      fileModel.countDocuments.mockResolvedValue(limit + 1);
+      await expect(service.changePlan(owner, code)).rejects.toThrow(
+        'Stored files',
+      );
+      fileModel.countDocuments.mockResolvedValue(limit);
+      await expect(service.changePlan(owner, code)).resolves.toBeDefined();
+    },
+  );
+
   it('fails closed when a company has no subscription', async () => {
     subscriptionModel.findOne.mockResolvedValue(null);
     await expect(

@@ -26,10 +26,7 @@ export const initials = (value = "") =>
     .map((s) => s[0])
     .join("")
     .toUpperCase() || "DV";
-export const fileUsage = (subscription) =>
-  subscription?.plan.code === "free"
-    ? (subscription.storedFiles ?? subscription.billingPeriod.uploadedFiles)
-    : subscription?.billingPeriod.uploadedFiles;
+export const fileUsage = (subscription) => subscription?.storedFiles ?? 0;
 export function filterFiles(
   files,
   { search = "", type = "", visibility = "", sort = "newest" },

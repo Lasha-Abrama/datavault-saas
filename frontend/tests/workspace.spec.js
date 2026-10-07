@@ -366,7 +366,47 @@ test("paid setup uses Stripe checkout with only the documented plan payload", as
     "https://checkout.stripe.com/c/pay/test_fixture",
   );
 });
-test("Stripe cancellation is scheduled and the current plan can be kept", async ({
+for (const plan of ["basic", "premium"]) {
+  test(`can buy ${plan} again after downgrading to Free`, async ({ page }) => {
+    await fixture(page);
+    await page.route(`${api}/subscriptions/current/billing`, (r) =>
+      r.fulfill({ json: { ...billing, plan: plans[0] } }),
+    );
+    await page.route(`${api}/payments/current`, (r) =>
+      r.fulfill({
+        json: paymentFixture({ planCode: "free", stripeStatus: "canceled" }),
+      }),
+    );
+    await page.route(`${api}/payments/checkout`, (r) => {
+      expect(r.request().postDataJSON()).toEqual({ planCode: plan });
+      return r.fulfill({
+        json: {
+          url: "https://checkout.stripe.com/c/pay/test_fixture",
+          mode: "setup",
+          paymentCollected: false,
+        },
+      });
+    });
+    await page.route("https://checkout.stripe.com/**", (r) =>
+      r.fulfill({
+        contentType: "text/html",
+        body: "<h1>Hosted checkout fixture</h1>",
+      }),
+    );
+    await page.goto("/dashboard/billing");
+    await page
+      .getByRole("button", {
+        name: `Upgrade to ${plan === "basic" ? "Basic" : "Premium"}`,
+      })
+      .click();
+    await page.getByRole("button", { name: "Continue to Stripe" }).click();
+    await expect(page).toHaveURL(
+      "https://checkout.stripe.com/c/pay/test_fixture",
+    );
+  });
+}
+
+test("Free downgrade confirms immediate loss of paid features", async ({
   page,
 }) => {
   await fixture(page);
@@ -376,36 +416,213 @@ test("Stripe cancellation is scheduled and the current plan can be kept", async 
   );
   await page.route(`${api}/payments/cancel`, (r) => {
     expect(r.request().postDataJSON()).toEqual({});
-    state = paymentFixture({
-      pendingPlanCode: "free",
-      pendingPlanAt: billing.billingPeriod.endsAt,
-      cancelAtPeriodEnd: true,
-    });
-    return r.fulfill({
-      json: {
-        planCode: "basic",
-        pendingPlanCode: "free",
-        effectiveAt: billing.billingPeriod.endsAt,
-        prorationBehavior: "none",
-      },
-    });
-  });
-  await page.route(`${api}/payments/plan`, (r) => {
-    expect(r.request().postDataJSON()).toEqual({ planCode: "basic" });
-    state = paymentFixture();
-    return r.fulfill({ json: { planCode: "basic", pendingPlanCode: null } });
+    state = paymentFixture({ planCode: "free", stripeStatus: "canceled" });
+    return r.fulfill({ json: { planCode: "free", pendingPlanCode: null } });
   });
   await page.goto("/dashboard/billing");
   await page.getByRole("button", { name: "Downgrade to Free" }).click();
-  await page.getByRole("button", { name: "Confirm plan change" }).click();
-  await expect(page.getByText(/Cancellation is scheduled/)).toBeVisible();
-  await page.getByRole("button", { name: "Keep Basic" }).click();
-  await page.getByRole("button", { name: "Confirm plan change" }).click();
-  await expect(page.getByText(/Cancellation is scheduled/)).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Current plan" }),
-  ).toBeDisabled();
+    page.getByText(/Free takes effect immediately after confirmation/),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/free-downgrade-immediate-desktop.png",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    page.getByRole("button", { name: "Confirm plan change" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/free-downgrade-immediate-mobile.png",
+  });
+  await page.getByRole("button", { name: "Confirm plan change" }).click();
+  await expect(page.getByText("Your workspace is now on Free.")).toBeVisible();
+  await expect(page.getByText(/Cancellation is scheduled/)).toHaveCount(0);
 });
+test("Free downgrade explains stored-file conflicts without exposing provider errors", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route(`${api}/payments/current`, (r) =>
+    r.fulfill({ json: paymentFixture() }),
+  );
+  await page.route(`${api}/payments/cancel`, (r) =>
+    r.fulfill({
+      status: 409,
+      json: {
+        code: "plan_file_limit",
+        planCode: "free",
+        limit: 10,
+        storedFiles: 11,
+        message: "private diagnostics",
+      },
+    }),
+  );
+  await page.goto("/dashboard/billing");
+  await page.getByRole("button", { name: "Downgrade to Free" }).click();
+  await page.getByRole("button", { name: "Confirm plan change" }).click();
+  await expect(page.getByText(/Free allows 10 stored files/)).toBeVisible();
+  await expect(page.getByText("private diagnostics")).toHaveCount(0);
+});
+test("Basic downgrade explains what to remove before retrying", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route(`${api}/subscriptions/current/billing`, (r) =>
+    r.fulfill({ json: { ...billing, plan: plans[2] } }),
+  );
+  await page.route(`${api}/payments/current`, (r) =>
+    r.fulfill({ json: paymentFixture({ planCode: "premium" }) }),
+  );
+  await page.route(`${api}/payments/plan`, (r) =>
+    r.fulfill({
+      status: 409,
+      json: {
+        code: "plan_file_limit",
+        planCode: "basic",
+        limit: 100,
+        storedFiles: 101,
+      },
+    }),
+  );
+  await page.goto("/dashboard/billing");
+  await page.getByRole("button", { name: "Downgrade to Basic" }).click();
+  await expect(
+    page.getByText(/Nothing is removed automatically/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Confirm plan change" }).click();
+  await expect(
+    page.getByText(/Basic allows 100 stored files. You currently have 101/),
+  ).toBeVisible();
+});
+
+for (const target of ["free", "basic"]) {
+  test(`${target} downgrade offers manual removal or separately confirmed automatic cleanup`, async ({
+    page,
+  }) => {
+    await fixture(page);
+    const limit = target === "free" ? 10 : 100;
+    await page.route(`${api}/subscriptions/current/billing`, (r) =>
+      r.fulfill({ json: { ...billing, plan: plans[2] } }),
+    );
+    await page.route(`${api}/payments/current`, (r) =>
+      r.fulfill({ json: paymentFixture({ planCode: "premium" }) }),
+    );
+    await page.route(`${api}/subscriptions/downgrade-preview`, (r) =>
+      r.fulfill({
+        json: {
+          planCode: target,
+          previewToken: "b".repeat(64),
+          storedFiles: limit + 5,
+          fileLimit: limit,
+          filesToKeep: limit,
+          filesToRemove: 5,
+          employees: 15,
+          employeeLimit: target === "free" ? 0 : 10,
+          employeesToRemove: target === "free" ? 15 : 5,
+          pendingInvitations: 2,
+          invitationsToRevoke: 2,
+        },
+      }),
+    );
+    let cleanups = 0;
+    await page.route(`${api}/subscriptions/downgrade-cleanup`, (r) => {
+      cleanups++;
+      expect(r.request().postDataJSON()).toEqual({
+        planCode: target,
+        previewToken: "b".repeat(64),
+      });
+      return r.fulfill({ json: { planCode: target, pendingPlanCode: null } });
+    });
+    await page.goto("/dashboard/billing");
+    await page
+      .getByRole("button", {
+        name: `Downgrade to ${target === "free" ? "Free" : "Basic"}`,
+      })
+      .click();
+    await expect(
+      page.getByText(
+        `You have ${limit + 5} stored files. ${target === "free" ? "Free" : "Basic"} allows ${limit}.`,
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Choose what to remove" }),
+    ).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: `test-results/${target}-cleanup-options-mobile.png`,
+      animations: "disabled",
+    });
+    const options = page.getByRole("dialog", {
+      name: `Prepare downgrade to ${target === "free" ? "Free" : "Basic"}`,
+    });
+    expect(
+      await options.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page
+      .getByRole("button", { name: "Review automatic cleanup" })
+      .click();
+    expect(cleanups).toBe(0);
+    await expect(
+      page.getByText(new RegExp(`keeping your ${limit} newest files`)),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Buying a higher plan later will not restore them/),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `test-results/${target}-cleanup-desktop.png`,
+      animations: "disabled",
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: `test-results/${target}-cleanup-mobile.png`,
+      animations: "disabled",
+    });
+    await page
+      .getByRole("button", { name: "Delete extras and downgrade", exact: true })
+      .click();
+    expect(cleanups).toBe(1);
+  });
+}
+
+test("manual cleanup navigates to files without sending a destructive request", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route(`${api}/payments/current`, (r) =>
+    r.fulfill({ json: paymentFixture() }),
+  );
+  await page.route(`${api}/subscriptions/downgrade-preview`, (r) =>
+    r.fulfill({
+      json: {
+        planCode: "free",
+        previewToken: "b".repeat(64),
+        storedFiles: 15,
+        fileLimit: 10,
+        filesToKeep: 10,
+        filesToRemove: 5,
+        employees: 1,
+        employeeLimit: 0,
+        employeesToRemove: 1,
+        pendingInvitations: 0,
+        invitationsToRevoke: 0,
+      },
+    }),
+  );
+  let cleanups = 0;
+  await page.route(`${api}/subscriptions/downgrade-cleanup`, (r) => {
+    cleanups++;
+    return r.fulfill({ json: {} });
+  });
+  await page.goto("/dashboard/billing");
+  await page.getByRole("button", { name: "Downgrade to Free" }).click();
+  await page.getByRole("button", { name: "Choose what to remove" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/files$/);
+  expect(cleanups).toBe(0);
+});
+
 test("payment returns verify state, do not trust success queries, and reconcile only on click", async ({
   page,
 }) => {
@@ -717,6 +934,26 @@ async function fixture(page, role = "owner", signedIn = true) {
       });
       return;
     }
+    if (path === "/subscriptions/downgrade-preview") {
+      const code = route.request().postDataJSON().planCode;
+      const plan = plans.find((plan) => plan.code === code);
+      await route.fulfill({
+        json: {
+          planCode: code,
+          previewToken: "a".repeat(64),
+          storedFiles: 2,
+          fileLimit: plan.includedFilesPerMonth,
+          filesToRemove: 0,
+          filesToKeep: 2,
+          employees: 0,
+          employeeLimit: plan.maxEmployees,
+          employeesToRemove: 0,
+          pendingInvitations: 0,
+          invitationsToRevoke: 0,
+        },
+      });
+      return;
+    }
     const bodies = {
       "/ai/conversations": { conversations: [], total: 0, page: 1, limit: 20 },
       "/auth/current-user": role === "owner" ? owner : member,
@@ -849,59 +1086,65 @@ test("file upload sends the chosen CSV and restricted employee access", async ({
   expect(payload).toContain(JSON.stringify([member._id]));
 });
 
-test("Free allows a replacement upload with nine stored files and ten historical uploads", async ({
-  page,
-}) => {
-  await fixture(page);
-  await page.route(`${api}/subscriptions/current`, (route) =>
-    route.fulfill({
-      json: {
-        plan: plans[0],
-        storedFiles: 9,
-        billingPeriod: { ...billing.billingPeriod, uploadedFiles: 10 },
-      },
-    }),
-  );
-  await page.goto("/dashboard/files");
-  await expect(page.locator(".sidebar-plan")).toContainText(
-    "9 / 10 files stored",
-  );
-  await page
-    .getByRole("button", { name: "Upload file", exact: true })
-    .first()
-    .click();
-  const dialog = page.getByRole("dialog", { name: "Add a file to your vault" });
-  await expect(dialog).toContainText(
-    "9 / 10 files stored. Deleting a file frees a slot.",
-  );
-  await expect(
-    dialog.getByText("Your vault is full.", { exact: false }),
-  ).toHaveCount(0);
-  await page
-    .getByLabel("Choose a file")
-    .setInputFiles({
+for (const [index, limit] of [
+  [0, 10],
+  [1, 100],
+  [2, 1000],
+]) {
+  test(`${plans[index].name} allows a replacement upload despite historical uploads`, async ({
+    page,
+  }) => {
+    await fixture(page);
+    await page.route(`${api}/subscriptions/current`, (route) =>
+      route.fulfill({
+        json: {
+          plan: plans[index],
+          storedFiles: limit - 1,
+          billingPeriod: { ...billing.billingPeriod, uploadedFiles: limit },
+        },
+      }),
+    );
+    await page.goto("/dashboard/files");
+    await expect(page.locator(".sidebar-plan")).toContainText(
+      `${limit - 1} / ${limit} files stored`,
+    );
+    await page
+      .getByRole("button", { name: "Upload file", exact: true })
+      .first()
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Add a file to your vault",
+    });
+    await expect(dialog).toContainText(
+      `${limit - 1} / ${limit} files stored. Deleting a file frees a slot.`,
+    );
+    await expect(
+      dialog.getByText("Your vault is full.", { exact: false }),
+    ).toHaveCount(0);
+    await page.getByLabel("Choose a file").setInputFiles({
       name: "replacement.csv",
       mimeType: "text/csv",
       buffer: Buffer.from("a,b\n1,2"),
     });
-  await expect(
-    dialog.getByRole("button", { name: "Upload file", exact: true }),
-  ).toBeEnabled();
-  await page.screenshot({
-    path: "test-results/free-file-slot-desktop.png",
-    fullPage: true,
-    animations: "disabled",
+    await expect(
+      dialog.getByRole("button", { name: "Upload file", exact: true }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: `test-results/${plans[index].code}-file-slot-desktop.png`,
+      fullPage: true,
+      animations: "disabled",
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(
+      dialog.getByRole("button", { name: "Upload file", exact: true }),
+    ).toBeEnabled();
+    await page.screenshot({
+      path: `test-results/${plans[index].code}-file-slot-mobile.png`,
+      fullPage: true,
+      animations: "disabled",
+    });
   });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(
-    dialog.getByRole("button", { name: "Upload file", exact: true }),
-  ).toBeEnabled();
-  await page.screenshot({
-    path: "test-results/free-file-slot-mobile.png",
-    fullPage: true,
-    animations: "disabled",
-  });
-});
+}
 
 test("an unavailable storage provider keeps the upload dialog open with a clear retry path", async ({
   page,

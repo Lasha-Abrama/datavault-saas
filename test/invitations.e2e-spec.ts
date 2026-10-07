@@ -622,7 +622,7 @@ describe('employee invitations (e2e)', () => {
       .patch('/subscriptions/current')
       .set(authorization(ownerToken))
       .send({ planCode: PlanCode.BASIC })
-      .expect(403);
+      .expect(409);
   });
 
   it('serializes an invitation against a concurrent downgrade', async () => {
@@ -639,7 +639,7 @@ describe('employee invitations (e2e)', () => {
 
     expect(
       [invitationResponse.status, downgradeResponse.status].sort(),
-    ).toEqual([202, 403]);
+    ).toEqual([202, 409]);
     const currentPlan = subscriptions.get(companyId.toString())!.planCode;
     const pendingCount = [...invitations.values()].filter(
       (invitation) => invitation.status === InvitationStatus.PENDING,

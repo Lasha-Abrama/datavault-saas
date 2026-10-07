@@ -460,16 +460,12 @@ function UploadDialog({ users, onClose, onUploaded }) {
       </div>
       <p className="small muted">
         {fileUsage(subscription) ?? "—"} /{" "}
-        {subscription?.plan.includedFilesPerMonth ?? "—"}{" "}
-        {subscription?.plan.code === "free"
-          ? "files stored. Deleting a file frees a slot."
-          : "included monthly uploads used."}
+        {subscription?.plan.includedFilesPerMonth ?? "—"} files stored. Deleting
+        a file frees a slot.
       </p>
       {atLimit && (
         <Alert>
-          {subscription?.plan.code === "free"
-            ? "Your vault is full. Delete a file or change your plan to add another."
-            : "Your plan’s monthly upload limit has been reached. Change your plan to add more files."}
+          Your vault is full. Delete a file or change your plan to add another.
         </Alert>
       )}
       <Permissions

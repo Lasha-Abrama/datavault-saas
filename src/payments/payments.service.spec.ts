@@ -206,7 +206,7 @@ describe('Stripe Test Mode payments', () => {
     expect(f.api.subscriptionSchedules.update).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects downgrades exceeding accepted/pending seats or historical upload usage', async () => {
+  it('rejects downgrades exceeding accepted/pending seats or stored files', async () => {
     await f.activate();
     f.addEmployees(8);
     f.addPending(3);
@@ -220,21 +220,127 @@ describe('Stripe Test Mode payments', () => {
       startsAt: billingPeriod(f.sub.activatedAt, new Date()).startsAt,
       uploadedFiles: 101,
     });
+    for (let i = 0; i < 101; i++) f.files.push({ companyId: f.sub.companyId });
     await expect(f.service.changePlan(f.owner, PlanCode.BASIC)).rejects.toThrow(
-      'Current-period uploads',
+      'Stored files',
     );
+    f.files.length = 100;
+    await f.service.changePlan(f.owner, PlanCode.BASIC);
+    expect(f.sub.pendingPlanCode).toBe(PlanCode.BASIC);
   });
 
-  it('cancels at the period end, then returns to Free only when its constraints fit', async () => {
+  it('cancels immediately without proration and uses stored files rather than monthly history', async () => {
     const remote = await f.activate(PlanCode.BASIC);
-    await f.service.changePlan(f.owner, PlanCode.FREE);
-    expect(f.sub.planCode).toBe(PlanCode.BASIC);
-    expect(f.sub.stripeCancelAtPeriodEnd).toBe(true);
-    remote.status = 'canceled';
-    await f.deliver(f.event('customer.subscription.deleted'));
-    expect(f.sub.planCode).toBe(PlanCode.FREE);
+    const anchor = f.sub.activatedAt;
+    f.periods.push({
+      companyId: f.sub.companyId,
+      startsAt: billingPeriod(anchor, new Date()).startsAt,
+      uploadedFiles: 101,
+    });
+    for (let i = 0; i < 10; i++) f.files.push({ companyId: f.sub.companyId });
+    f.files.push({ companyId: f.other.companyId });
+    const result = await f.service.changePlan(f.owner, PlanCode.FREE);
+    expect(result.planCode).toBe(PlanCode.FREE);
+    expect(remote.status).toBe('canceled');
+    expect(f.api.subscriptions.cancel).toHaveBeenCalledWith(
+      remote.id,
+      { invoice_now: false, prorate: false },
+      expect.any(Object),
+    );
+    expect(f.sub.activatedAt).toEqual(anchor);
     expect(f.sub.pendingPlanCode).toBeUndefined();
     expect(f.sub.paymentAccess).toBe(PaymentAccess.ACTIVE);
+    expect(f.periods[0].uploadedFiles).toBe(101);
+  });
+
+  it.each([PlanCode.BASIC, PlanCode.PREMIUM])(
+    'can buy %s again after an immediate Free downgrade',
+    async (plan) => {
+      const previous = await f.activate();
+      const anchor = f.sub.activatedAt;
+      await f.service.changePlan(f.owner, PlanCode.FREE);
+      await f.service.checkout(f.owner, plan);
+      expect(f.sub.planCode).toBe(PlanCode.FREE);
+      expect(() => assertPaymentAccess(f.sub, true)).not.toThrow();
+      const checkout = f.sessions.get(f.sub.stripeCheckoutSessionId!)!;
+      checkout.status = 'complete';
+      await f.deliver(
+        f.event('checkout.session.completed', 'evt_rebuy', { id: checkout.id }),
+      );
+      expect(f.sub.planCode).toBe(plan);
+      expect(f.sub.stripeSubscriptionId).not.toBe(previous.id);
+      expect(previous.status).toBe('canceled');
+      expect(f.sub.activatedAt).toEqual(anchor);
+      await f.deliver(
+        f.event('customer.subscription.deleted', 'evt_old_deleted', {
+          id: previous.id,
+        }),
+      );
+      expect(f.sub.planCode).toBe(plan);
+    },
+  );
+
+  it('releases a queued Basic schedule before canceling immediately to Free', async () => {
+    await f.activate();
+    await f.service.changePlan(f.owner, PlanCode.BASIC);
+    await f.service.changePlan(f.owner, PlanCode.FREE);
+    expect(f.api.subscriptionSchedules.release).toHaveBeenCalledTimes(1);
+    expect(f.sub.stripeScheduleId).toBeUndefined();
+    expect(f.sub.planCode).toBe(PlanCode.FREE);
+  });
+
+  it.each(['employees', 'invitations'])(
+    'rejects Free with remaining %s',
+    async (kind) => {
+      await f.activate();
+      if (kind === 'employees') f.addEmployees(1);
+      else f.addPending(1);
+      await expect(
+        f.service.changePlan(f.owner, PlanCode.FREE),
+      ).rejects.toThrow('Accepted employees');
+      expect(f.api.subscriptions.cancel).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects Free until extra stored files are deleted', async () => {
+    await f.activate();
+    for (let i = 0; i < 11; i++) f.files.push({ companyId: f.sub.companyId });
+    await expect(f.service.changePlan(f.owner, PlanCode.FREE)).rejects.toThrow(
+      'Stored files',
+    );
+    expect(f.api.subscriptions.cancel).not.toHaveBeenCalled();
+    f.files.pop();
+    await f.service.changePlan(f.owner, PlanCode.FREE);
+    expect(f.sub.planCode).toBe(PlanCode.FREE);
+  });
+
+  it('does not grant Free on cancellation failure and retries the recorded intent', async () => {
+    await f.activate(PlanCode.BASIC);
+    f.api.subscriptions.cancel.mockRejectedValueOnce(
+      new Error('provider failure'),
+    );
+    await expect(
+      f.service.changePlan(f.owner, PlanCode.FREE),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(f.sub.planCode).toBe(PlanCode.BASIC);
+    expect(f.sub.pendingPlanCode).toBe(PlanCode.FREE);
+    await f.service.reconcileCompany(f.owner.companyId);
+    expect(f.sub.planCode).toBe(PlanCode.FREE);
+  });
+
+  it('recovers a lost cancellation response without canceling twice', async () => {
+    const remote = await f.activate(PlanCode.BASIC);
+    f.api.subscriptions.cancel.mockImplementationOnce(() => {
+      remote.status = 'canceled';
+      return Promise.reject(new Error('response lost'));
+    });
+    await expect(
+      f.service.changePlan(f.owner, PlanCode.FREE),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(f.sub.planCode).toBe(PlanCode.BASIC);
+    await f.service.reconcileCompany(f.owner.companyId);
+    expect(f.sub.planCode).toBe(PlanCode.FREE);
+    expect(f.api.subscriptions.cancel).toHaveBeenCalledTimes(1);
   });
 
   it('suspends an externally canceled company that cannot fit Free, without deleting data', async () => {
@@ -455,7 +561,11 @@ describe('Stripe Test Mode payments', () => {
 
   it('allows owners to undo queued cancellation without changing the anniversary', async () => {
     await f.activate(PlanCode.BASIC);
-    await f.service.changePlan(f.owner, PlanCode.FREE);
+    const remote = f.remote.get(f.sub.stripeSubscriptionId!)!;
+    remote.cancel_at_period_end = true;
+    f.sub.pendingPlanCode = PlanCode.FREE;
+    f.sub.pendingPlanAt = new Date(Date.now() + 86400000);
+    f.sub.stripePlanConfirmed = true;
     await f.service.changePlan(f.owner, PlanCode.BASIC);
     expect(f.sub.stripeCancelAtPeriodEnd).toBe(false);
     expect(f.sub.pendingPlanCode).toBeUndefined();
@@ -663,19 +773,15 @@ describe('Stripe Test Mode payments', () => {
     expect(f.sub.stripeScheduleId).toBeUndefined();
   });
 
-  it('does not silently postpone an unconfirmed cancellation that missed its anniversary', async () => {
+  it('immediately replaces an existing confirmed period-end Free cancellation', async () => {
     const remote = await f.activate(PlanCode.BASIC);
-    await f.service.changePlan(f.owner, PlanCode.FREE);
-    f.sub.stripePlanConfirmed = false;
+    remote.cancel_at_period_end = true;
+    f.sub.pendingPlanCode = PlanCode.FREE;
+    f.sub.stripePlanConfirmed = true;
     f.sub.pendingPlanAt = new Date(Date.now() - 1000);
-    remote.cancel_at_period_end = false;
-    await expect(
-      f.service.reconcileCompany(f.owner.companyId),
-    ).rejects.toBeInstanceOf(ConflictException);
-    expect(f.sub.paymentSyncIssue).toBe(
-      PaymentSyncIssue.RECONCILIATION_REQUIRED,
-    );
-    await f.service.changePlan(f.owner, PlanCode.BASIC);
+    await f.service.changePlan(f.owner, PlanCode.FREE);
+    expect(remote.status).toBe('canceled');
+    expect(f.sub.planCode).toBe(PlanCode.FREE);
     expect(f.sub.pendingPlanCode).toBeUndefined();
   });
 

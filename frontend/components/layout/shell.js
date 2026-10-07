@@ -137,19 +137,12 @@ function AuthenticatedShell({ children }) {
           </div>
           <p>
             <strong>{fileUsage(subscription) ?? "—"}</strong> /{" "}
-            {subscription?.plan.includedFilesPerMonth ?? "—"}{" "}
-            {subscription?.plan.code === "free"
-              ? "files stored"
-              : "monthly uploads"}
+            {subscription?.plan.includedFilesPerMonth ?? "—"} files stored
           </p>
           <Progress
             value={fileUsage(subscription) || 0}
             max={subscription?.plan.includedFilesPerMonth || 1}
-            label={
-              subscription?.plan.code === "free"
-                ? "Stored file usage"
-                : "Monthly file usage"
-            }
+            label="Stored file usage"
           />
           <Link href="/dashboard/billing">
             {isAdmin ? "Manage your plan" : "View your plan"}{" "}

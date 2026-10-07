@@ -139,7 +139,7 @@ describe('EntitlementsService', () => {
       planCode: PlanCode.BASIC,
       activatedAt,
     });
-    periodModel.findOne.mockResolvedValueOnce({ uploadedFiles: 99 });
+    fileModel.countDocuments.mockResolvedValueOnce(99);
     await expect(
       service.checkFileUpload(
         companyId,
@@ -147,7 +147,7 @@ describe('EntitlementsService', () => {
         new Date('2026-01-21T00:00:00.000Z'),
       ),
     ).resolves.toMatchObject({ allowed: true });
-    periodModel.findOne.mockResolvedValueOnce({ uploadedFiles: 100 });
+    fileModel.countDocuments.mockResolvedValueOnce(100);
     await expect(
       service.checkFileUpload(
         companyId,
@@ -160,25 +160,74 @@ describe('EntitlementsService', () => {
     });
   });
 
-  it('allows a Free replacement despite historical uploads and rechecks stored capacity in the transaction', async () => {
-    periodModel.findOne.mockResolvedValue({ uploadedFiles: 25 });
-    fileModel.countDocuments.mockResolvedValue(9);
+  it.each([PlanCode.FREE, PlanCode.BASIC, PlanCode.PREMIUM])(
+    'allows a %s replacement despite historical uploads and rechecks stored capacity in the transaction',
+    async (code) => {
+      const plan = PLAN_CATALOG[code];
+      subscriptionsService.getSubscription.mockResolvedValue({
+        planCode: code,
+        activatedAt,
+      });
+      subscriptionsService.acquireLock.mockResolvedValue({
+        planCode: code,
+        activatedAt,
+      });
+      periodModel.findOne.mockResolvedValue({ uploadedFiles: 25 });
+      fileModel.countDocuments.mockResolvedValue(
+        plan.includedFilesPerMonth - 1,
+      );
+      await expect(service.checkFileUpload(companyId)).resolves.toMatchObject({
+        allowed: true,
+        uploadedFiles: 25,
+        additionalChargeCents: 0,
+        remainingIncludedFiles: 1,
+        quotaBasis: 'stored_files',
+      });
+      expect(fileModel.countDocuments).toHaveBeenCalledWith({ companyId });
+      await service.recordFileUploads(companyId);
+      expect(fileModel.countDocuments).toHaveBeenCalledWith(
+        { companyId },
+        { session },
+      );
+      fileModel.countDocuments.mockResolvedValue(plan.includedFilesPerMonth);
+      if (code !== PlanCode.PREMIUM)
+        await expect(
+          service.recordFileUploads(companyId),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+    },
+  );
+
+  it('does not reset Basic stored capacity at a billing boundary', async () => {
+    subscriptionsService.getSubscription.mockResolvedValue({
+      planCode: PlanCode.BASIC,
+      activatedAt,
+    });
+    subscriptionsService.acquireLock.mockResolvedValue({
+      planCode: PlanCode.BASIC,
+      activatedAt,
+    });
+    periodModel.findOne.mockResolvedValue(null);
+    fileModel.countDocuments.mockResolvedValue(100);
+    await expect(
+      service.checkFileUpload(companyId, 1, new Date('2026-02-21')),
+    ).resolves.toMatchObject({ allowed: false });
+    await expect(
+      service.recordFileUploads(companyId, 1, new Date('2026-02-21')),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('quotes Premium overage above stored capacity even at the start of a new billing period', async () => {
+    subscriptionsService.getSubscription.mockResolvedValue({
+      planCode: PlanCode.PREMIUM,
+      activatedAt,
+    });
+    periodModel.findOne.mockResolvedValue(null);
+    fileModel.countDocuments.mockResolvedValue(1000);
     await expect(service.checkFileUpload(companyId)).resolves.toMatchObject({
       allowed: true,
-      uploadedFiles: 25,
-      remainingIncludedFiles: 1,
-      quotaBasis: 'stored_files',
+      additionalChargeCents: 50,
+      uploadedFiles: 0,
     });
-    expect(fileModel.countDocuments).toHaveBeenCalledWith({ companyId });
-    await service.recordFileUploads(companyId);
-    expect(fileModel.countDocuments).toHaveBeenCalledWith(
-      { companyId },
-      { session },
-    );
-    fileModel.countDocuments.mockResolvedValue(10);
-    await expect(service.recordFileUploads(companyId)).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
   });
 
   it('quotes only the incremental Premium overage for a request', async () => {
@@ -187,6 +236,7 @@ describe('EntitlementsService', () => {
       activatedAt,
     });
     periodModel.findOne.mockResolvedValue({ uploadedFiles: 1001 });
+    fileModel.countDocuments.mockResolvedValue(1001);
     await expect(
       service.checkFileUpload(
         companyId,
@@ -205,6 +255,7 @@ describe('EntitlementsService', () => {
       activatedAt,
     });
     periodModel.findOne.mockResolvedValue({ uploadedFiles: 999 });
+    fileModel.countDocuments.mockResolvedValue(999);
     await service.recordFileUploads(
       companyId,
       3,
@@ -280,6 +331,7 @@ describe('EntitlementsService', () => {
       service.assertEmployeeCapacity(companyId, session as never),
     ).rejects.toBeInstanceOf(ForbiddenException);
     periodModel.findOne.mockResolvedValue({ uploadedFiles: 100 });
+    fileModel.countDocuments.mockResolvedValue(100);
     await expect(service.checkFileUpload(companyId)).resolves.toMatchObject({
       allowed: false,
     });
@@ -301,6 +353,7 @@ describe('EntitlementsService', () => {
     };
     subscriptionsService.acquireLock.mockResolvedValue(managed);
     periodModel.findOne.mockResolvedValue({ uploadedFiles: 999 });
+    fileModel.countDocuments.mockResolvedValue(999);
     await service.recordFileUploads(companyId, 3, at);
     expect(subscriptionsService.enqueueOverage).toHaveBeenCalledWith(
       managed,
