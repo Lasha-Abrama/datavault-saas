@@ -497,7 +497,7 @@ tbody tr:hover {
   margin-bottom: 26px;
 }
 .dropzone {
-  border-radius: 4px;
+  border-radius: 14px;
   box-shadow: none;
   background: #eef3ea;
 }
@@ -879,7 +879,7 @@ dialog {
   border-radius: 12px;
 }
 .modal-header {
-  background: transparent;
+  background: var(--surface);
 }
 .radio-card {
   border: 0;

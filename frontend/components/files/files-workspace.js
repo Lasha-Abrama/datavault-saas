@@ -89,12 +89,19 @@ export function FileTable({ files, users = [], onSelect, compact = false }) {
     </div>
   );
 }
-function Permissions({ value, onChange, users, isAdmin, user }) {
+function Permissions({
+  value,
+  onChange,
+  users,
+  isAdmin,
+  user,
+  legend = "Who can access this file?",
+}) {
   const [search, setSearch] = useState("");
   const employees = users.filter((u) => u.role === "company_member");
   return (
     <fieldset className="permissions">
-      <legend>Who can access this file?</legend>
+      <legend>{legend}</legend>
       {[
         [
           "company_wide",
@@ -373,50 +380,191 @@ function UploadDialog({ users, onClose, onUploaded }) {
   const { user, isAdmin } = useAuth(),
     { subscription } = useWorkspace(),
     toast = useToast();
-  const [file, setFile] = useState(null),
+  const [files, setFiles] = useState([]),
     [permissions, setPermissions] = useState({
       visibility: "company_wide",
       restrictedUserIds: [],
     }),
     [progress, setProgress] = useState(0),
+    [activeId, setActiveId] = useState(null),
+    [activeNumber, setActiveNumber] = useState(0),
+    [activeTotal, setActiveTotal] = useState(0),
+    [uploadedCount, setUploadedCount] = useState(0),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(null),
     [dragging, setDragging] = useState(false);
   const controller = useRef(null),
-    input = useRef(null);
+    input = useRef(null),
+    stopped = useRef(false),
+    nextId = useRef(0),
+    initialStored = useRef(fileUsage(subscription));
   useEffect(() => () => controller.current?.abort(), []);
   function choose(selected) {
-    setError(null);
-    if (!selected) return;
-    if (!/\.(csv|xlsx?)$/i.test(selected.name) || !selected.size) {
-      setError(new Error("Choose a non-empty CSV, XLS, or XLSX file."));
+    const picked = Array.from(selected || []);
+    if (!picked.length) return;
+    const invalid = picked.find(
+      (file) => !/\.(csv|xlsx?)$/i.test(file.name) || !file.size,
+    );
+    if (invalid) {
+      setError(
+        new Error(
+          `“${invalid.name}” is empty or unsupported. Choose non-empty CSV, XLS, or XLSX files.`,
+        ),
+      );
       return;
     }
-    setFile(selected);
+    if (
+      remainingSlots !== null &&
+      pending.length + picked.length > remainingSlots
+    ) {
+      setError(
+        new Error(
+          `Only ${Math.max(0, remainingSlots - pending.length)} more ${remainingSlots - pending.length === 1 ? "file fits" : "files fit"} on your current plan. Nothing from this selection was added.`,
+        ),
+      );
+      return;
+    }
+    setError(null);
+    setFiles((current) => [
+      ...current,
+      ...picked.map((file) => ({
+        id: ++nextId.current,
+        file,
+        status: "ready",
+        message: "",
+      })),
+    ]);
   }
   async function send() {
+    const candidates = files.filter(
+      (item) => item.status === "ready" || item.status === "failed",
+    );
+    if (!candidates.length) return;
     setBusy(true);
     setError(null);
     setProgress(0);
-    controller.current = new AbortController();
+    setActiveTotal(candidates.length);
+    stopped.current = false;
+    let succeeded = 0,
+      failed = 0,
+      interrupted = false;
     try {
-      await upload(file, permissions, setProgress, controller.current.signal);
-      toast("File added to your vault");
-      onUploaded();
-      onClose();
+      // The workspace summary can be stale if another person just uploaded a file.
+      const current = await request("/subscriptions/current");
+      if (
+        current.plan.extraFilePriceCents === null &&
+        candidates.length >
+          Math.max(0, current.plan.includedFilesPerMonth - fileUsage(current))
+      ) {
+        setError(
+          new Error(
+            "Your available file slots changed. Refresh the vault or remove files from this batch before trying again.",
+          ),
+        );
+        onUploaded();
+        return;
+      }
+      for (const [index, item] of candidates.entries()) {
+        if (stopped.current) {
+          interrupted = true;
+          break;
+        }
+        const activeController = new AbortController();
+        controller.current = activeController;
+        setActiveId(item.id);
+        setActiveNumber(index + 1);
+        setProgress(0);
+        setFiles((currentFiles) =>
+          currentFiles.map((entry) =>
+            entry.id === item.id ? { ...entry, status: "uploading" } : entry,
+          ),
+        );
+        try {
+          await upload(
+            item.file,
+            permissions,
+            setProgress,
+            activeController.signal,
+          );
+          succeeded++;
+          setUploadedCount((count) => count + 1);
+          setFiles((currentFiles) =>
+            currentFiles.map((entry) =>
+              entry.id === item.id ? { ...entry, status: "success" } : entry,
+            ),
+          );
+        } catch (uploadError) {
+          const uncertain =
+            stopped.current ||
+            activeController.signal.aborted ||
+            uploadError.status === 0;
+          setFiles((currentFiles) =>
+            currentFiles.map((entry) =>
+              entry.id === item.id
+                ? {
+                    ...entry,
+                    status: uncertain ? "uncertain" : "failed",
+                    message: uncertain
+                      ? "Check the vault before retrying; this file may already have been saved."
+                      : uploadError.message,
+                  }
+                : entry,
+            ),
+          );
+          if (stopped.current || activeController.signal.aborted)
+            interrupted = true;
+          else failed++;
+          // Capacity, storage, or connection failures usually affect the rest too.
+          if (uncertain || [401, 403, 429, 503].includes(uploadError.status))
+            break;
+        } finally {
+          controller.current = null;
+        }
+      }
     } catch (e) {
       setError(e);
-      onUploaded();
     } finally {
+      if (succeeded || failed || interrupted) onUploaded();
+      if (interrupted)
+        setError(
+          new Error(
+            "Upload stopped. The vault has been refreshed; check it before retrying the interrupted file.",
+          ),
+        );
+      else if (failed)
+        setError(
+          new Error(
+            `${succeeded} ${succeeded === 1 ? "file was" : "files were"} uploaded; ${failed} ${failed === 1 ? "file needs" : "files need"} attention. Review the list below.`,
+          ),
+        );
+      else if (succeeded === candidates.length) {
+        toast(
+          succeeded === 1
+            ? "File added to your vault"
+            : `${succeeded} files added to your vault`,
+        );
+        onClose();
+      }
       setBusy(false);
+      setActiveId(null);
+      setActiveNumber(0);
+      setActiveTotal(0);
     }
   }
-  const atLimit =
-    subscription &&
-    subscription.plan.extraFilePriceCents === null &&
-    fileUsage(subscription) >= subscription.plan.includedFilesPerMonth;
+  const stored = Math.max(
+      fileUsage(subscription),
+      initialStored.current + uploadedCount,
+    ),
+    hardLimit = subscription?.plan.extraFilePriceCents === null,
+    allowance = subscription?.plan.includedFilesPerMonth,
+    remainingSlots =
+      hardLimit && allowance != null ? Math.max(0, allowance - stored) : null,
+    pending = files.filter(
+      (item) => item.status === "ready" || item.status === "failed",
+    ),
+    overLimit = remainingSlots !== null && pending.length > remainingSlots;
   return (
-    <Modal title="Add a file to your vault" onClose={onClose} busy={busy}>
+    <Modal title="Add files to your vault" onClose={onClose} busy={busy} wide>
       <Alert>{error?.message}</Alert>
       <div
         className={`dropzone ${dragging ? "dragging" : ""}`}
@@ -428,66 +576,142 @@ function UploadDialog({ users, onClose, onUploaded }) {
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          if (!busy) choose(e.dataTransfer.files[0]);
+          if (!busy) choose(e.dataTransfer.files);
         }}
       >
         <FileUp size={30} />
-        <h3>{file ? file.name : "Drop your file here"}</h3>
-        <p>
-          {file ? bytes(file.size) : "CSV, XLS, or XLSX · One file at a time"}
-        </p>
+        <h3>Drop your files here</h3>
+        <p>CSV, XLS, or XLSX · Select multiple files at once</p>
         <input
           ref={input}
           type="file"
+          multiple
           accept=".csv,.xls,.xlsx"
           className="sr-only"
-          aria-label="Choose a file"
+          aria-label="Choose files"
           disabled={busy}
-          onChange={(e) => choose(e.target.files[0])}
+          onChange={(e) => {
+            choose(e.target.files);
+            e.target.value = "";
+          }}
         />
         <Button
           variant="secondary"
           disabled={busy}
           onClick={() => input.current.click()}
         >
-          {file ? "Choose another file" : "Browse files"}
+          {files.length ? "Add more files" : "Browse files"}
         </Button>
-        {file && !busy && (
-          <button className="text-link" onClick={() => setFile(null)}>
-            Remove
-          </button>
-        )}
       </div>
+      {files.length > 0 && (
+        <section
+          className="upload-queue"
+          aria-label="Files selected for upload"
+        >
+          <div className="upload-queue-heading">
+            <strong>{files.length} selected</strong>
+            <span>{pending.length} ready to upload</span>
+          </div>
+          <ul>
+            {files.map((item) => (
+              <li
+                key={item.id}
+                className={
+                  item.status === "failed" || item.status === "uncertain"
+                    ? "has-error"
+                    : ""
+                }
+              >
+                <FileIcon
+                  type={item.file.name.split(".").pop().toLowerCase()}
+                />
+                <span className="upload-queue-details">
+                  <strong>{item.file.name}</strong>
+                  <small>
+                    {bytes(item.file.size)} ·{" "}
+                    {item.status === "uploading"
+                      ? `Uploading ${progress}%`
+                      : item.status === "success"
+                        ? "Uploaded"
+                        : item.status === "failed" ||
+                            item.status === "uncertain"
+                          ? item.message
+                          : "Ready"}
+                  </small>
+                </span>
+                {item.status === "success" ? (
+                  <Check
+                    size={18}
+                    className="upload-queue-success"
+                    aria-label="Uploaded"
+                  />
+                ) : (
+                  !busy && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Remove ${item.file.name}`}
+                      onClick={() => {
+                        setFiles((current) =>
+                          current.filter((entry) => entry.id !== item.id),
+                        );
+                        setError(null);
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <p className="small muted">
-        {fileUsage(subscription) ?? "—"} /{" "}
-        {subscription?.plan.includedFilesPerMonth ?? "—"} files stored. Deleting
-        a file frees a slot.
+        {stored} / {allowance ?? "—"} files stored. Deleting a file frees a
+        slot.{" "}
+        {remainingSlots === null
+          ? "Files above the included allowance may have a plan charge."
+          : `${remainingSlots} ${remainingSlots === 1 ? "slot" : "slots"} available.`}
       </p>
-      {atLimit && (
+      {remainingSlots === 0 && (
         <Alert>
           Your vault is full. Delete a file or change your plan to add another.
         </Alert>
       )}
+      {overLimit && (
+        <Alert>
+          This batch exceeds your available file slots. Remove files before
+          uploading.
+        </Alert>
+      )}
+      <p className="small muted">
+        Visibility below applies to every file in this batch.
+      </p>
       <Permissions
         value={permissions}
         onChange={setPermissions}
         users={users}
         isAdmin={isAdmin}
         user={user}
+        legend="Who can access these files?"
       />
       {busy && (
-        <div role="status">
+        <div role="status" aria-live="polite">
           <Progress value={progress} max={100} label="Upload progress" />
           <p className="small muted">
-            {progress === 100
-              ? "File transferred. Waiting for the server to confirm…"
-              : `Uploading · ${progress}%`}
+            {activeId
+              ? `File ${activeNumber} of ${activeTotal} · ${progress === 100 ? "Transferred; waiting for the server…" : `Uploading ${progress}%`}`
+              : "Checking your available file slots…"}
           </p>
           <Button
             variant="secondary"
-            onClick={() => controller.current?.abort()}
+            onClick={() => {
+              stopped.current = true;
+              controller.current?.abort();
+            }}
           >
-            Stop upload
+            Stop uploads
           </Button>
         </div>
       )}
@@ -495,8 +719,8 @@ function UploadDialog({ users, onClose, onUploaded }) {
         <Button
           busy={busy}
           disabled={
-            !file ||
-            atLimit ||
+            !pending.length ||
+            overLimit ||
             !subscription ||
             (permissions.visibility === "restricted" &&
               !permissions.restrictedUserIds.length)
@@ -504,7 +728,11 @@ function UploadDialog({ users, onClose, onUploaded }) {
           onClick={send}
         >
           <Upload size={16} />
-          Upload file
+          {pending.length === 0
+            ? "Upload files"
+            : pending.length === 1
+              ? "Upload file"
+              : `Upload ${pending.length} files`}
         </Button>
       </div>
     </Modal>
