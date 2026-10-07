@@ -1,5 +1,6 @@
-import { IsString, Length, Matches } from 'class-validator';
+import { IsString, Length } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { NewPassword } from '../../common/password-policy';
 
 export class ChangePasswordDto {
   @ApiProperty({ minLength: 1, maxLength: 72, writeOnly: true })
@@ -7,11 +8,8 @@ export class ChangePasswordDto {
   @Length(1, 72)
   currentPassword: string;
 
-  @ApiProperty({ minLength: 8, maxLength: 72, writeOnly: true })
+  @ApiProperty({ minLength: 12, maxLength: 72, writeOnly: true })
   @IsString()
-  @Length(8, 72)
-  @Matches(/\S/, {
-    message: 'newPassword must contain a non-whitespace character',
-  })
+  @NewPassword()
   newPassword: string;
 }

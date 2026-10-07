@@ -34,19 +34,19 @@ test("reset link is removed from the address bar and a new password can be set",
   });
   await page.goto(`/reset-password#token=${token}`);
   await expect(page).toHaveURL(/\/reset-password$/);
-  await page.getByLabel("New password", { exact: true }).fill("newPassword123");
+  await page.getByLabel("New password", { exact: true }).fill("NewPassword42!");
   await page.getByLabel("Confirm new password").fill("different123");
   await page.getByRole("button", { name: "Reset password" }).click();
   await expect(
     page.getByText("Passwords do not match. Please try again."),
   ).toBeVisible();
   expect(body).toBeUndefined();
-  await page.getByLabel("Confirm new password").fill("newPassword123");
+  await page.getByLabel("Confirm new password").fill("NewPassword42!");
   await page.getByRole("button", { name: "Reset password" }).click();
   await expect(
     page.getByRole("heading", { name: "Password updated" }),
   ).toBeVisible();
-  expect(body).toEqual({ token, newPassword: "newPassword123" });
+  expect(body).toEqual({ token, newPassword: "NewPassword42!" });
 });
 
 test("missing, expired and repeated reset links give useful recovery options", async ({
@@ -66,8 +66,8 @@ test("missing, expired and repeated reset links give useful recovery options", a
     }),
   );
   await page.goto(`/reset-password#token=${token}`);
-  await page.getByLabel("New password", { exact: true }).fill("newPassword123");
-  await page.getByLabel("Confirm new password").fill("newPassword123");
+  await page.getByLabel("New password", { exact: true }).fill("NewPassword42!");
+  await page.getByLabel("Confirm new password").fill("NewPassword42!");
   await page.getByRole("button", { name: "Reset password" }).click();
   await expect(
     page.getByText(/invalid, expired, or has already been used/i),

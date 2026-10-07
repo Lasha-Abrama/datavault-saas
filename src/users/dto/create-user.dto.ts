@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import { IsEmail, IsString, Length } from 'class-validator';
+import { NewPassword } from '../../common/password-policy';
 
 export class CreateUserDto {
   @Transform(({ value }: { value: unknown }) =>
@@ -16,6 +17,6 @@ export class CreateUserDto {
   email: string;
 
   @IsString()
-  @Length(6, 20)
+  @NewPassword()
   password: string;
 }

@@ -9,6 +9,7 @@ import {
   CompanyPlatformStatus,
 } from '../companies/platform-status';
 import { AdminAuditAction } from '../admin/entities/admin-audit.entity';
+import { validNewPassword } from '../common/password-policy';
 
 export interface SmokeResponse {
   status: number;
@@ -344,8 +345,9 @@ async function runPlatformAdminSmokeTest(
 ) {
   if (
     !isEmail(operator.email) ||
-    operator.password.length < 6 ||
-    operator.password.length > 20 ||
+    (start.mode === 'register'
+      ? !validNewPassword(operator.password)
+      : operator.password.length < 1 || operator.password.length > 72) ||
     !operator.adminToken ||
     !fixtureName.startsWith('DataVault admin smoke ')
   )

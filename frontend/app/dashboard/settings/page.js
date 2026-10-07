@@ -6,6 +6,12 @@ import { request } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { date } from "@/lib/utils";
 import {
+  NEW_PASSWORD_HINT,
+  NEW_PASSWORD_MAX_LENGTH,
+  NEW_PASSWORD_MIN_LENGTH,
+  validNewPassword,
+} from "@/lib/password-policy";
+import {
   Alert,
   Badge,
   Button,
@@ -134,19 +140,18 @@ export default function Settings() {
                 type="password"
                 name="currentPassword"
                 required
-                maxLength={72}
+                maxLength={NEW_PASSWORD_MAX_LENGTH}
                 autoComplete="current-password"
               />
               <Field
                 label="New password"
                 type="password"
                 name="newPassword"
-                minLength={8}
-                maxLength={20}
-                pattern=".*\S.*"
+                minLength={NEW_PASSWORD_MIN_LENGTH}
+                maxLength={NEW_PASSWORD_MAX_LENGTH}
                 required
                 autoComplete="new-password"
-                hint="8–20 characters. Use a different password from your current one."
+                hint={NEW_PASSWORD_HINT}
               />
             </SaveForm>
           </SettingsSection>
@@ -237,6 +242,13 @@ function SaveForm({
         e.preventDefault();
         const form = e.currentTarget,
           body = Object.fromEntries(new FormData(form));
+        if (
+          endpoint === "/users/me/password" &&
+          !validNewPassword(body.newPassword)
+        ) {
+          setError(new Error(NEW_PASSWORD_HINT));
+          return;
+        }
         setBusy(true);
         setError(null);
         try {

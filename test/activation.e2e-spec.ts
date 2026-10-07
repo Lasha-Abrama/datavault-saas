@@ -63,7 +63,7 @@ interface UserFilter {
 const registration = {
   companyName: '  Acme  ',
   email: 'OWNER@EXAMPLE.COM ',
-  password: 'password',
+  password: 'TenantPassword42!',
   country: ' ge ',
   industry: '  Financial   Services ',
 };
@@ -417,7 +417,7 @@ describe('company registration and activation (e2e)', () => {
     expect(company).not.toHaveProperty('email');
     expect(company).not.toHaveProperty('password');
     expect(user.email).toBe('owner@example.com');
-    expect(user.password).not.toBe('password');
+    expect(user.password).not.toBe('TenantPassword42!');
     expect(user.fullName).toBeUndefined();
     expect(user.companyId).toEqual(company._id);
     expect(user.role).toBe(Role.COMPANY_OWNER);
@@ -440,6 +440,8 @@ describe('company registration and activation (e2e)', () => {
     { companyName: ' ' },
     { email: 'invalid' },
     { password: 'short' },
+    { password: 'longbutmissingrules' },
+    { password: 'A'.repeat(60) + 'a1!é'.repeat(5) },
     { fullName: null },
     { activatedAt: new Date().toISOString() },
     { role: Role.COMPANY_OWNER },
@@ -452,13 +454,23 @@ describe('company registration and activation (e2e)', () => {
     },
   );
 
+  it('accepts a strong password longer than the old 20-character sign-in limit', async () => {
+    const password = 'A'.repeat(60) + 'a1!';
+    await register({ password }).expect(202);
+    await verify(lastToken()).expect(200);
+    await request(app.getHttpServer())
+      .post('/auth/sign-in')
+      .send({ email: 'owner@example.com', password })
+      .expect(201);
+  });
+
   it('blocks login and all protected tenant functionality until activation, then permits normal sign-in', async () => {
     await register().expect(202);
     const user = [...users.values()][0];
     const forgedToken = app.get(JwtService).sign({ id: user._id.toString() });
     await request(app.getHttpServer())
       .post('/auth/sign-in')
-      .send({ email: user.email, password: 'password' })
+      .send({ email: user.email, password: 'TenantPassword42!' })
       .expect(401);
     for (const path of [
       '/auth/current-user',
@@ -479,7 +491,7 @@ describe('company registration and activation (e2e)', () => {
     expect(verifications.size).toBe(0);
     const login = await request(app.getHttpServer())
       .post('/auth/sign-in')
-      .send({ email: user.email, password: 'password' })
+      .send({ email: user.email, password: 'TenantPassword42!' })
       .expect(201);
     const body = login.body as unknown as { accessToken: string };
     await request(app.getHttpServer())
@@ -508,31 +520,37 @@ describe('company registration and activation (e2e)', () => {
     const owner = [...users.values()][0];
     const ownerLogin = await request(app.getHttpServer())
       .post('/auth/sign-in')
-      .send({ email: owner.email, password: 'password' })
+      .send({ email: owner.email, password: 'TenantPassword42!' })
       .expect(201);
     const ownerToken = (ownerLogin.body as { accessToken: string }).accessToken;
     const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
     await request(app.getHttpServer())
       .patch('/users/me/password')
-      .send({ currentPassword: 'password', newPassword: 'new-password' })
+      .send({
+        currentPassword: 'TenantPassword42!',
+        newPassword: 'NewPassword42!',
+      })
       .expect(401);
     await request(app.getHttpServer())
       .patch('/users/me/password')
       .set(auth(ownerToken))
-      .send({ currentPassword: 'wrong-password', newPassword: 'new-password' })
+      .send({
+        currentPassword: 'wrong-password',
+        newPassword: 'NewPassword42!',
+      })
       .expect(401);
     await request(app.getHttpServer())
       .patch('/users/me/password')
       .set(auth(ownerToken))
-      .send({ currentPassword: 'password', newPassword: 'short' })
+      .send({ currentPassword: 'TenantPassword42!', newPassword: 'short' })
       .expect(400);
     await request(app.getHttpServer())
       .patch('/users/me/password')
       .set(auth(ownerToken))
       .send({
-        currentPassword: 'password',
-        newPassword: 'new-password',
+        currentPassword: 'TenantPassword42!',
+        newPassword: 'NewPassword42!',
         companyId: new Types.ObjectId().toString(),
       })
       .expect(400);
@@ -553,17 +571,20 @@ describe('company registration and activation (e2e)', () => {
     await request(app.getHttpServer())
       .patch('/users/me/password')
       .set(auth(ownerToken))
-      .send({ currentPassword: 'password', newPassword: 'new-password' })
+      .send({
+        currentPassword: 'TenantPassword42!',
+        newPassword: 'NewPassword42!',
+      })
       .expect(200)
       .expect({ message: 'Password changed successfully' });
-    expect(await bcrypt.compare('new-password', owner.password)).toBe(true);
+    expect(await bcrypt.compare('NewPassword42!', owner.password)).toBe(true);
     await request(app.getHttpServer())
       .post('/auth/sign-in')
-      .send({ email: owner.email, password: 'password' })
+      .send({ email: owner.email, password: 'TenantPassword42!' })
       .expect(401);
     await request(app.getHttpServer())
       .post('/auth/sign-in')
-      .send({ email: owner.email, password: 'new-password' })
+      .send({ email: owner.email, password: 'NewPassword42!' })
       .expect(201);
 
     const employee: UserState = {
@@ -591,12 +612,12 @@ describe('company registration and activation (e2e)', () => {
       .set(auth(employeeToken))
       .send({
         currentPassword: 'employee-password',
-        newPassword: 'employee-new-password',
+        newPassword: 'EmployeeNew42!',
       })
       .expect(200);
-    expect(
-      await bcrypt.compare('employee-new-password', employee.password),
-    ).toBe(true);
+    expect(await bcrypt.compare('EmployeeNew42!', employee.password)).toBe(
+      true,
+    );
   });
 
   it('rejects invalid, malformed, expired tokens and tenant selectors without activation', async () => {

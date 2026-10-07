@@ -11,6 +11,7 @@ import {
 } from './admin-smoke-test.service';
 import { hiddenPrompt } from './hidden-prompt';
 import { CliFailure, CliFailureCategory, safeCliCategory } from './cli-errors';
+import { validNewPassword } from '../common/password-policy';
 
 async function main() {
   let registrationAttempted = false;
@@ -82,10 +83,15 @@ async function main() {
       .toLowerCase();
     const password = await hiddenPrompt(
       command.mode === 'register'
-        ? 'NEW tenant password (hidden; 6–20 characters): '
+        ? 'NEW tenant password (hidden; 12–72 characters, upper/lowercase, number, symbol; at most 72 UTF-8 bytes): '
         : 'Existing smoke tenant password (hidden): ',
     );
-    if (!email || password.length < 6 || password.length > 20)
+    if (
+      !email ||
+      (command.mode === 'register'
+        ? !validNewPassword(password)
+        : password.length < 1 || password.length > 72)
+    )
       throw new CliFailure(CliFailureCategory.INVALID_SMOKE_CONFIGURATION);
     const activateNormally = async () => {
       const activation = await hiddenPrompt(

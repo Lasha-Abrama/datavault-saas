@@ -11,7 +11,7 @@ test("existing signup shows a route back to sign in", async ({ page }) => {
   await page.getByLabel("Company name").fill("Acme Studio");
   await page.getByLabel("Your name").fill("Alex Morgan");
   await page.getByLabel("Work email").fill("alex@example.com");
-  await page.getByLabel("Create a password").fill("password123");
+  await page.getByLabel("Create a password").fill("TenantPassword42!");
   await page.getByLabel("Country").fill("GE");
   await page.getByLabel("Industry").fill("Technology");
   await page.getByRole("button", { name: "Create your workspace" }).click();

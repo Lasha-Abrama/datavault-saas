@@ -580,6 +580,16 @@ for (const target of ["free", "basic"]) {
       path: `test-results/${target}-cleanup-mobile.png`,
       animations: "disabled",
     });
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(cleanups).toBe(0);
+    await page
+      .getByRole("button", {
+        name: `Downgrade to ${target === "free" ? "Free" : "Basic"}`,
+      })
+      .click();
+    await page
+      .getByRole("button", { name: "Review automatic cleanup" })
+      .click();
     await page
       .getByRole("button", { name: "Delete extras and downgrade", exact: true })
       .click();

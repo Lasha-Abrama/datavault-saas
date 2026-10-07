@@ -13,6 +13,7 @@ const routes = [
   ["POST", /^admin\/companies\/[a-f\d]{24}\/(suspend|reactivate)$/i],
   ["GET", /^payments\/current$/],
   ["POST", /^payments\/(checkout|portal|plan|cancel|reconcile)$/],
+  ["POST", /^subscriptions\/(downgrade-preview|downgrade-cleanup)$/],
   ["POST", /^ai\/chat$/],
   ["GET", /^ai\/conversations$/],
   ["GET", /^ai\/conversations\/[a-f\d]{24}$/i],

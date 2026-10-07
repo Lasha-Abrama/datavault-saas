@@ -1,6 +1,7 @@
 import { hkdfSync } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { JwtModuleOptions } from '@nestjs/jwt';
+import { validNewPassword } from '../common/password-policy';
 
 export const PLATFORM_ADMIN_ISSUER = 'datavault-platform';
 export const PLATFORM_ADMIN_AUDIENCE = 'datavault-platform-admin';
@@ -34,16 +35,6 @@ export function platformAdminJwtOptions(
   };
 }
 
-export function validPlatformAdminPassword(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length >= 12 &&
-    Buffer.byteLength(value, 'utf8') <= 72 &&
-    /[a-z]/.test(value) &&
-    /[A-Z]/.test(value) &&
-    /\d/.test(value) &&
-    /[^A-Za-z0-9\s]/.test(value)
-  );
-}
+export const validPlatformAdminPassword = validNewPassword;
 
 export const validBootstrapPassword = validPlatformAdminPassword;

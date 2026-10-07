@@ -206,6 +206,29 @@ describe('Explicit downgrade cleanup', () => {
     expect(f.storage.deleteObject).not.toHaveBeenCalled();
   });
 
+  it('keeps the newest 100 files when cleaning up for Basic', async () => {
+    const f = fixture();
+    for (let index = 15; index < 105; index++)
+      f.files.push(row(index, { storageKey: `synthetic-${index}` }));
+    const retained = f.files
+      .filter((file) => file.companyId === companyId)
+      .slice(5)
+      .map((file) => file._id);
+    const preview = await f.service.preview(owner, PlanCode.BASIC);
+    expect(preview).toMatchObject({
+      storedFiles: 105,
+      fileLimit: 100,
+      filesToRemove: 5,
+    });
+    expect(f.storage.deleteObject).not.toHaveBeenCalled();
+    await f.service.cleanup(owner, PlanCode.BASIC, preview.previewToken);
+    expect(
+      f.files
+        .filter((file) => file.companyId === companyId)
+        .map((file) => file._id),
+    ).toEqual(retained);
+  });
+
   it('keeps the oldest pending invitations within the seats left after accepted employees', async () => {
     const f = fixture();
     f.employees.splice(8, 7);

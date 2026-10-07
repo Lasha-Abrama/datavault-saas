@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import { IsString, Length, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { NewPassword } from '../../common/password-policy';
 
 export class AcceptInvitationDto {
   @ApiProperty({
@@ -22,8 +23,8 @@ export class AcceptInvitationDto {
   @Length(1, 100)
   fullName: string;
 
-  @ApiProperty({ minLength: 6, maxLength: 20, writeOnly: true })
+  @ApiProperty({ minLength: 12, maxLength: 72, writeOnly: true })
   @IsString()
-  @Length(6, 20)
+  @NewPassword()
   password: string;
 }

@@ -11,6 +11,12 @@ import {
   Users,
 } from "lucide-react";
 import { Button, Confirm, Field, Loading, Logo } from "@/components/ui";
+import {
+  NEW_PASSWORD_HINT,
+  NEW_PASSWORD_MAX_LENGTH,
+  NEW_PASSWORD_MIN_LENGTH,
+  validNewPassword,
+} from "@/lib/password-policy";
 import "./platform.css";
 
 const key = "datavault.platform.session";
@@ -253,18 +259,8 @@ export default function PlatformAdmin() {
       setError("Passwords do not match.");
       return;
     }
-    if (
-      typeof newPassword !== "string" ||
-      newPassword.length < 12 ||
-      new TextEncoder().encode(newPassword).length > 72 ||
-      !/[a-z]/.test(newPassword) ||
-      !/[A-Z]/.test(newPassword) ||
-      !/\d/.test(newPassword) ||
-      !/[^A-Za-z0-9\s]/.test(newPassword)
-    ) {
-      setError(
-        "Use 12–72 bytes with uppercase and lowercase letters, a number, and a symbol.",
-      );
+    if (!validNewPassword(newPassword)) {
+      setError(NEW_PASSWORD_HINT);
       return;
     }
     setBusy(true);
@@ -316,18 +312,8 @@ export default function PlatformAdmin() {
       setError("Passwords do not match.");
       return;
     }
-    if (
-      typeof newPassword !== "string" ||
-      newPassword.length < 12 ||
-      new TextEncoder().encode(newPassword).length > 72 ||
-      !/[a-z]/.test(newPassword) ||
-      !/[A-Z]/.test(newPassword) ||
-      !/\d/.test(newPassword) ||
-      !/[^A-Za-z0-9\s]/.test(newPassword)
-    ) {
-      setError(
-        "Use 12–72 bytes with uppercase and lowercase letters, a number, and a symbol.",
-      );
+    if (!validNewPassword(newPassword)) {
+      setError(NEW_PASSWORD_HINT);
       return;
     }
     setBusy(true);
@@ -523,6 +509,7 @@ export default function PlatformAdmin() {
                   name="password"
                   type="password"
                   autoComplete="current-password"
+                  maxLength={NEW_PASSWORD_MAX_LENGTH}
                   required
                 />
                 <Button busy={busy} className="full">
@@ -597,16 +584,18 @@ export default function PlatformAdmin() {
                 name="newPassword"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={NEW_PASSWORD_MIN_LENGTH}
+                maxLength={NEW_PASSWORD_MAX_LENGTH}
                 required
-                hint="At least 12 characters with uppercase and lowercase letters, a number, and a symbol."
+                hint={NEW_PASSWORD_HINT}
               />
               <Field
                 label="Confirm new password"
                 name="confirmPassword"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={NEW_PASSWORD_MIN_LENGTH}
+                maxLength={NEW_PASSWORD_MAX_LENGTH}
                 required
               />
               <Button
@@ -625,16 +614,18 @@ export default function PlatformAdmin() {
                 name="newPassword"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={NEW_PASSWORD_MIN_LENGTH}
+                maxLength={NEW_PASSWORD_MAX_LENGTH}
                 required
-                hint="At least 12 characters with uppercase and lowercase letters, a number, and a symbol."
+                hint={NEW_PASSWORD_HINT}
               />
               <Field
                 label="Confirm new password"
                 name="confirmPassword"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={NEW_PASSWORD_MIN_LENGTH}
+                maxLength={NEW_PASSWORD_MAX_LENGTH}
                 required
               />
               <Button

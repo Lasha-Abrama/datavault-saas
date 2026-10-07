@@ -11,9 +11,9 @@ export class SignInDto {
   @IsEmail()
   email: string;
 
-  @ApiProperty({ minLength: 6, maxLength: 20, writeOnly: true })
+  @ApiProperty({ minLength: 1, maxLength: 72, writeOnly: true })
   @IsNotEmpty()
   @IsString()
-  @Length(6, 20)
+  @Length(1, 72)
   password: string;
 }

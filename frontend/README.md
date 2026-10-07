@@ -49,7 +49,7 @@ Read against `../FRONTEND_HANDOFF.md` and the deployed `/docs/openapi.json` on 2
 ## Backend limitations intentionally reflected in the UI
 
 - File controls are available. The backend reports an error if storage is not configured; a live upload still requires working S3 credentials and a suitable tenant account.
-- No forgot-password/reset-password endpoints exist. Those routes explain the limitation; authenticated password changes work. New passwords are limited to 20 characters because sign-in currently rejects longer values even though password change accepts up to 72.
+- Workspace and platform-admin password recovery use their respective forgot-password and reset-password endpoints. All newly created passwords use the same 12–72 character, uppercase/lowercase, number, symbol, and 72 UTF-8 byte policy; sign-in continues to accept older passwords.
 - There is no public invitation-preview endpoint, so the join page does not invent a company name.
 - There is no audit log, notification feed, workspace switcher, storage byte quota, or invitation-created timestamp. The app does not fabricate these. File search, format/access filters, sorting, and usage views are the additional features.
 - Members cannot list employees. Their permission editor can retain/remove existing recipient IDs or select themselves; administrators have a searchable directory. Unknown uploaders are shown as “Company member” rather than guessing a name.

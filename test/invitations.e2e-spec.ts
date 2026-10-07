@@ -505,14 +505,18 @@ describe('employee invitations (e2e)', () => {
       .send({
         token,
         fullName: 'Employee Name',
-        password: 'password',
+        password: 'TenantPassword42!',
         companyId: otherCompanyId.toString(),
         role: Role.COMPANY_OWNER,
       })
       .expect(400);
     await request(app.getHttpServer())
       .post('/invitations/accept')
-      .send({ token, fullName: ' Employee Name ', password: 'password' })
+      .send({
+        token,
+        fullName: ' Employee Name ',
+        password: 'TenantPassword42!',
+      })
       .expect(200);
     const accepted = [...users.values()].find(
       (user) => user.email === 'employee@example.com',
@@ -520,13 +524,15 @@ describe('employee invitations (e2e)', () => {
     expect(accepted.companyId.toString()).toBe(companyId.toString());
     expect(accepted.role).toBe(Role.COMPANY_MEMBER);
     expect(accepted.fullName).toBe('Employee Name');
-    expect(await bcrypt.compare('password', accepted.password!)).toBe(true);
+    expect(await bcrypt.compare('TenantPassword42!', accepted.password!)).toBe(
+      true,
+    );
     const acceptedInvitation = [...invitations.values()][0];
     expect(acceptedInvitation.status).toBe(InvitationStatus.ACCEPTED);
     expect(acceptedInvitation).not.toHaveProperty('tokenHash');
     await request(app.getHttpServer())
       .post('/invitations/accept')
-      .send({ token, fullName: 'Replay', password: 'password' })
+      .send({ token, fullName: 'Replay', password: 'TenantPassword42!' })
       .expect(400);
   });
 
@@ -536,7 +542,7 @@ describe('employee invitations (e2e)', () => {
       .send({
         token: 'a'.repeat(43),
         fullName: 'Employee',
-        password: 'password',
+        password: 'TenantPassword42!',
       })
       .expect(400);
     await invite('expired@example.com').expect(202);
@@ -544,7 +550,11 @@ describe('employee invitations (e2e)', () => {
     [...invitations.values()][0].expiresAt = new Date(Date.now() - 1);
     await request(app.getHttpServer())
       .post('/invitations/accept')
-      .send({ token: expiredToken, fullName: 'Employee', password: 'password' })
+      .send({
+        token: expiredToken,
+        fullName: 'Employee',
+        password: 'TenantPassword42!',
+      })
       .expect(400);
 
     invitations.clear();
@@ -557,19 +567,25 @@ describe('employee invitations (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post('/invitations/accept')
-      .send({ token: revokedToken, fullName: 'Employee', password: 'password' })
+      .send({
+        token: revokedToken,
+        fullName: 'Employee',
+        password: 'TenantPassword42!',
+      })
       .expect(400);
     await invite('member@example.com').expect(409);
 
     await invite('race@example.com').expect(202);
     const raceToken = rawToken();
+    const acceptRacingInvitation = (fullName: string) =>
+      request(app.getHttpServer()).post('/invitations/accept').send({
+        token: raceToken,
+        fullName,
+        password: 'TenantPassword42!',
+      });
     const results = await Promise.all([
-      request(app.getHttpServer())
-        .post('/invitations/accept')
-        .send({ token: raceToken, fullName: 'First', password: 'password' }),
-      request(app.getHttpServer())
-        .post('/invitations/accept')
-        .send({ token: raceToken, fullName: 'Second', password: 'password' }),
+      acceptRacingInvitation('First'),
+      acceptRacingInvitation('Second'),
     ]);
     expect(results.map((result) => result.status).sort()).toEqual([200, 400]);
     expect(
@@ -695,7 +711,11 @@ describe('employee invitations (e2e)', () => {
     expect(sender.send).toHaveBeenCalledTimes(2);
     await request(app.getHttpServer())
       .post('/invitations/accept')
-      .send({ token: newToken, fullName: 'Employee', password: 'password' })
+      .send({
+        token: newToken,
+        fullName: 'Employee',
+        password: 'TenantPassword42!',
+      })
       .expect(200);
   });
 });

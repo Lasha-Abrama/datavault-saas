@@ -13,6 +13,12 @@ import { googleSignInUrl, request } from "@/lib/api";
 import { Alert, Button, Field, Logo, Loading } from "@/components/ui";
 import LivingVault from "./living-vault";
 import { paymentReturnPaths } from "@/lib/payments";
+import {
+  NEW_PASSWORD_HINT,
+  NEW_PASSWORD_MAX_LENGTH,
+  NEW_PASSWORD_MIN_LENGTH,
+  validNewPassword,
+} from "@/lib/password-policy";
 function loginDestination() {
   const next = new URLSearchParams(window.location.search).get("next");
   return paymentReturnPaths.includes(next) ? next : "/dashboard";
@@ -171,6 +177,17 @@ export default function AuthPage({ mode }) {
     setError(null);
     const values = Object.fromEntries(new FormData(event.currentTarget));
     try {
+      if (
+        (mode === "reset-password" ||
+          mode === "employee-activate" ||
+          (mode === "register" && !googleCode)) &&
+        !validNewPassword(
+          mode === "reset-password" ? values.newPassword : values.password,
+        )
+      ) {
+        setError(new Error(NEW_PASSWORD_HINT));
+        return;
+      }
       if (mode === "login") {
         await login(values);
         router.replace(loginDestination());
@@ -392,10 +409,10 @@ export default function AuthPage({ mode }) {
                     name="newPassword"
                     type="password"
                     autoComplete="new-password"
-                    minLength={8}
-                    maxLength={72}
+                    minLength={NEW_PASSWORD_MIN_LENGTH}
+                    maxLength={NEW_PASSWORD_MAX_LENGTH}
                     required
-                    hint="8–72 characters"
+                    hint={NEW_PASSWORD_HINT}
                     error={error?.fields?.newPassword}
                   />
                   <Field
@@ -403,8 +420,8 @@ export default function AuthPage({ mode }) {
                     name="confirmPassword"
                     type="password"
                     autoComplete="new-password"
-                    minLength={8}
-                    maxLength={72}
+                    minLength={NEW_PASSWORD_MIN_LENGTH}
+                    maxLength={NEW_PASSWORD_MAX_LENGTH}
                     required
                   />
                   <Button busy={busy} className="full">
@@ -512,12 +529,14 @@ export default function AuthPage({ mode }) {
                         name="password"
                         type="password"
                         required
-                        minLength={6}
-                        maxLength={20}
+                        minLength={
+                          mode === "login" ? 1 : NEW_PASSWORD_MIN_LENGTH
+                        }
+                        maxLength={NEW_PASSWORD_MAX_LENGTH}
                         autoComplete={
                           mode === "login" ? "current-password" : "new-password"
                         }
-                        hint={mode !== "login" ? "6–20 characters" : undefined}
+                        hint={mode !== "login" ? NEW_PASSWORD_HINT : undefined}
                         error={error?.fields?.password}
                       />
                     )}

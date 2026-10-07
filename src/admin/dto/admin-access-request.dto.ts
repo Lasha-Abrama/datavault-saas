@@ -11,9 +11,8 @@ import {
   Matches,
   Max,
   Min,
-  ValidateBy,
 } from 'class-validator';
-import { validPlatformAdminPassword } from '../admin-security';
+import { NewPassword } from '../../common/password-policy';
 
 export class RequestPlatformAccessDto {
   @ApiProperty({ minLength: 2, maxLength: 100 })
@@ -49,10 +48,7 @@ export class AccessRequestTokenDto {
 export class SetupPlatformAccessDto extends AccessRequestTokenDto {
   @ApiProperty({ writeOnly: true, minLength: 12, maxLength: 72 })
   @IsString()
-  @ValidateBy({
-    name: 'platformAdminPassword',
-    validator: { validate: validPlatformAdminPassword },
-  })
+  @NewPassword()
   newPassword: string;
 }
 
