@@ -1,3 +1,7 @@
+# Handoff status
+
+This document preserves detailed API contracts and historical deployment observations. For current setup, capabilities, and operational guidance, use [README.md](README.md) and [docs/README.md](docs/README.md). Historical staging availability is not a current live verification; consult [the stabilization roadmap](docs/stabilization-roadmap.md).
+
 # DataVault frontend handoff (Render staging)
 
 The staging API base URL is `https://datavault-saas.onrender.com`. There is **no `/api` prefix**. Set `NEXT_PUBLIC_API_URL=https://datavault-saas.onrender.com` in the frontend. Interactive API documentation is at [Swagger](https://datavault-saas.onrender.com/docs), and its OpenAPI JSON is at `/docs/openapi.json`. Process health is `/health/live`; MongoDB readiness is `/health/ready`. Render Free can cold-start after inactivity, so allow for an initial slow response. These URLs identify staging, not a production SLA.
@@ -20,12 +24,12 @@ Backend configuration requires two HTTPS frontend page URLs, but does not mandat
 
 Swagger documents the request/response DTOs, success and important error statuses, owner/member authorization, pagination, multipart upload fields, binary downloads, and separate tenant/admin Bearer schemes. The primary tenant groups are `/auth`, `/users`, `/companies/current`, public `/plans`, `/subscriptions/current` and `/subscriptions/current/billing`, `/statistics/current`, `/invitations`, `/files`, `/payments`, and `/ai`. The `/admin` namespace uses separate Platform Admin credentials; the local frontend has a separate `/admin` screen. `GET /users` and employee deletion are owner-only; both owner and member may read their allowed tenant views. The billing endpoint is an internal current-period estimate, not an invoice or payment receipt.
 
-Staging currently has `STRIPE_ENABLED=false`, `OPENROUTER_ENABLED=false`, Google OAuth unconfigured, and S3 unconfigured:
+At the original handoff, staging had `STRIPE_ENABLED=false`, `OPENROUTER_ENABLED=false`, Google OAuth unconfigured, and S3 unconfigured:
 
 - Payment endpoints return HTTP 503 for an authenticated owner while Stripe is disabled; do not present them as working Checkout or invoices. The internal `PATCH /subscriptions/current` assignment-mode plan change can still operate without payment, so do not portray it as a paid purchase.
-- `POST /ai/chat` returns HTTP 503 with code `ai_disabled`; conversation reads may still be empty/not found. Hide or disable AI chat in this integration phase.
+- `POST /ai/chat` returns HTTP 503 with code `ai_disabled`; conversation reads may still be empty/not found. The current assistant handles disabled-service responses and retains readable history; see [AI behavior](docs/ai.md).
 - Google sign-in and sign-up endpoints return HTTP 503 while unconfigured. After configuration, new users complete company details through `POST /auth/google/register` and receive an activated workspace.
-- File upload and S3-backed download/delete return a sanitized HTTP 503 when storage is unconfigured, after any earlier validation or authorization checks. File metadata listing can still return normally. Hide upload/download controls until S3 staging storage is enabled; never assume a 503 means an upload succeeded.
+- File upload and S3-backed download/delete return a sanitized HTTP 503 when storage is unconfigured, after any earlier validation or authorization checks. File metadata listing can still return normally. Current file controls report storage errors and retain safe per-file outcomes; never assume a 503 means an upload succeeded. See [file security](docs/security.md).
 
 Treat 400 validation errors, 401 missing/expired/inactive authentication, 403 insufficient role or plan entitlement, 404 unavailable or unauthorized tenant resource, 409 conflicts, 429 throttling, and 503 disabled/unavailable dependencies as distinct UI states. Do not retry a mutation automatically after an ambiguous network failure. Successful provider acceptance is not proof that email reached the inbox.
 

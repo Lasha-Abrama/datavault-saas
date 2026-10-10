@@ -1,3 +1,7 @@
+# Frontend agent guidance
+
+Follow the shared [repository instructions](../AGENTS.md). Read [architecture](../docs/architecture.md), [development and testing](../docs/development.md), and relevant feature documentation before editing. Preserve tenant/platform session separation and existing accessible, responsive components.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know

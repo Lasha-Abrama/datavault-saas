@@ -1,0 +1,28 @@
+# Troubleshooting
+
+[Documentation index](README.md). Inspect sanitized errors and configuration
+names; never paste environment dumps, private URIs, raw provider errors, tokens
+or uploaded data into logs, issues or chats.
+
+| Symptom                                      | Check and recovery                                                                                                                                                                                                                            |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Startup rejects a setting                    | `.env.example` is a template, not runnable configuration. Check the named key in [environment](environment.md), including the required email mode and provider group.                                                                         |
+| Mongo connection/index startup fails         | Confirm database name, network allowlist, credentials and index permissions privately. Transactions require a replica set/sharded cluster; standalone MongoDB is unsupported.                                                                 |
+| API and frontend cannot both start           | Frontend uses 3000; set API `PORT=3001`. Confirm the listener belongs to this checkout before stopping any process.                                                                                                                           |
+| Browser tests show another app/404           | Playwright targets `localhost:3000`; an unrelated IPv6 listener can differ from the frontend's IPv4 listener. Resolve the intended local host/listener or use a temporary test configuration, without changing unrelated apps.                |
+| Gateway returns 404/503                      | Check `NEXT_PUBLIC_API_URL` and its lack of an `/api` prefix, restart/rebuild, then check the gateway method/path allowlist and API readiness. Google start/callback and webhooks are intentionally not proxied.                              |
+| Direct API request has a CORS error          | Use exact origins without paths/trailing slash/wildcard. Check localhost vs 127.0.0.1; each origin is distinct. The normal gateway flow is same-origin.                                                                                       |
+| Signup/invitation reports delivery failure   | The inactive signup/pending invitation may already be saved. Fix provider TLS/sender settings; use activation or invitation resend instead of repeating creation. Provider acceptance is not inbox delivery.                                  |
+| SMTP fails on Render Free                    | Ports 25/465/587 are restricted; use the documented Brevo 2525 STARTTLS configuration or the existing HTTPS Resend adapter. Do not disable TLS to mask deployment errors.                                                                     |
+| Google start rejects HTTPS or callback fails | Verify all four OAuth settings, exact callback, testing consent access and confirmed proxy hops. Never log state or exchange codes.                                                                                                           |
+| File upload/download/delete is unavailable   | Check private bucket/region and runtime IAM permissions. Blank storage settings disable operations. Review proxy body limits and memory separately from the API size setting.                                                                 |
+| An upload has an uncertain outcome           | Refresh the vault before resubmitting. The dialog excludes success/uncertainty from retries; it cannot provide exactly-once delivery across sessions. Review compensation/orphan reconciliation without deleting a possibly committed object. |
+| Tenant or admin gets 401/403/404             | Use the correct purpose-separated token; check activation, platform suspension, authentication version, role and file visibility. A known ObjectId does not authorize access.                                                                 |
+| AI is disabled or times out                  | Configure an enabled tool-capable provider, or keep the disabled state. Refresh saved history before manual resend; local abort/deadline does not prove backend cancellation. Do not raise limits without considering the gateway deadline.   |
+| Stripe is disabled or out of sync            | Disabled assignment mode is not a paid purchase. Use Test Mode catalog/portal configuration and owner reconciliation; never clear ledgers or pretend a deferred invoice was paid. Review [billing](billing.md).                               |
+| Frontend tests need Chromium                 | Run `npx playwright install chromium` in `frontend/`, check OS dependencies and local listener permissions. Mock tests and live tests are distinct.                                                                                           |
+| `npm ci` rejects a lockfile or Node version  | Use Node 24 and install in the correct package directory. Review a deliberate manifest/lockfile change; do not replace lockfiles merely to bypass installation.                                                                               |
+
+No provider credentials are required for isolated backend tests. A live
+integration check does need a separately authorized environment and fixtures;
+do not weaken production checks or modify secrets to make mock tests pass.
