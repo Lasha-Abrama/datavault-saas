@@ -33,6 +33,7 @@ export default function AssistantWorkspace({ floating = false }) {
     [selected, setSelected] = useState(null),
     [draft, setDraft] = useState(""),
     [busy, setBusy] = useState(false),
+    [longWait, setLongWait] = useState(false),
     [error, setError] = useState(null),
     [removing, setRemoving] = useState(null),
     [pending, setPending] = useState("");
@@ -54,6 +55,11 @@ export default function AssistantWorkspace({ floating = false }) {
   );
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => {
+    if (!busy) return;
+    const timer = setTimeout(() => setLongWait(true), 15000);
+    return () => clearTimeout(timer);
+  }, [busy]);
+  useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
   }, [thread.data, busy]);
   function select(id) {
@@ -70,6 +76,7 @@ export default function AssistantWorkspace({ floating = false }) {
     if (!message || sending.current || thread.loading || thread.error) return;
     sending.current = true;
     setBusy(true);
+    setLongWait(false);
     setError(null);
     setPending(message);
     controller.current = new AbortController();
@@ -95,6 +102,15 @@ export default function AssistantWorkspace({ floating = false }) {
       setBusy(false);
       setPending("");
     }
+  }
+  function stopWaiting() {
+    controller.current?.abort();
+    setError(
+      new Error(
+        "Stopped waiting. The server may still save a response. Check saved history before sending again.",
+      ),
+    );
+    history.reload();
   }
   const disabled = error?.code === "ai_disabled";
   return (
@@ -285,15 +301,35 @@ export default function AssistantWorkspace({ floating = false }) {
               </div>
             )}
             {busy && (
-              <div role="status" className="chat-pending">
+              <div className="chat-pending">
                 <article className="chat-message user">
                   <span>You · Sending</span>
                   <div>{pending}</div>
                 </article>
-                <Loading label="Working on your answer" />
               </div>
             )}
             <div ref={end} />
+          </div>
+          <div
+            className="assistant-activity"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {busy && (
+              <>
+                <span className="assistant-activity-dots" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span>
+                  {longWait
+                    ? "Still waiting for a response"
+                    : "Waiting for a response"}
+                </span>
+              </>
+            )}
           </div>
           <div className="chat-composer">
             <Alert>{error?.message}</Alert>
@@ -304,10 +340,21 @@ export default function AssistantWorkspace({ floating = false }) {
               </p>
             )}
             {error && !disabled && (
-              <p className="small muted">
-                Your draft has been kept. Refresh history before sending again
-                if the result was interrupted.
-              </p>
+              <div className="assistant-recovery">
+                <p className="small muted">
+                  Your draft has been kept. Refresh history before sending again
+                  if the result was interrupted.
+                </p>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    history.reload();
+                    if (selected) thread.reload();
+                  }}
+                >
+                  Refresh saved history
+                </Button>
+              </div>
             )}
             <form onSubmit={send}>
               <label className="sr-only" htmlFor="assistant-message">
@@ -335,18 +382,31 @@ export default function AssistantWorkspace({ floating = false }) {
               />
               <div className="composer-footer">
                 <span>Enter to send · Shift+Enter for a new line</span>
-                <Button
-                  busy={busy}
-                  disabled={
-                    !draft.trim() ||
-                    disabled ||
-                    thread.loading ||
-                    !!thread.error
-                  }
-                >
-                  <ArrowUp size={16} />
-                  Send
-                </Button>
+                {busy ? (
+                  <Button
+                    key="stop"
+                    type="button"
+                    variant="secondary"
+                    className="assistant-stop"
+                    onClick={stopWaiting}
+                  >
+                    Stop waiting
+                  </Button>
+                ) : (
+                  <Button
+                    key="send"
+                    type="submit"
+                    disabled={
+                      !draft.trim() ||
+                      disabled ||
+                      thread.loading ||
+                      !!thread.error
+                    }
+                  >
+                    <ArrowUp size={16} />
+                    Send
+                  </Button>
+                )}
               </div>
             </form>
             <p className="composer-note">

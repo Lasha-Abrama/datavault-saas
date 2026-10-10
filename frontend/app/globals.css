@@ -2777,9 +2777,59 @@ input::placeholder {
   border-radius: 8px;
   padding: 15px 18px;
 }
-.chat-pending .loading-state {
-  min-height: 130px;
-  padding: 20px;
+.assistant-activity:empty {
+  display: none;
+}
+.assistant-activity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.assistant-activity-dots {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.assistant-activity-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: assistant-wait 1.4s ease-in-out infinite;
+}
+.assistant-activity-dots i:nth-child(2) {
+  animation-delay: 160ms;
+}
+.assistant-activity-dots i:nth-child(3) {
+  animation-delay: 320ms;
+}
+@keyframes assistant-wait {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.floating-chat-panel[hidden] .assistant-activity-dots i {
+  animation-play-state: paused;
+}
+.assistant-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .assistant-activity-dots i {
+    animation: none;
+    opacity: 0.75;
+  }
 }
 .chat-composer {
   border-top: 1px solid var(--line);
@@ -3328,6 +3378,13 @@ dialog {
 }
 .compact-assistant .composer-footer .button svg {
   width: 17px;
+}
+.compact-assistant .composer-footer .assistant-stop {
+  width: auto;
+  padding: 8px 12px;
+  border-radius: 18px;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 .compact-assistant .composer-note {
   font-size: 9px;

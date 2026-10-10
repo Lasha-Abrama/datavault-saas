@@ -1753,6 +1753,174 @@ test("AI disabled state keeps the draft and mobile chat fits the viewport", asyn
   ).toBeTruthy();
 });
 
+test("assistant waiting feedback prevents duplicate sends, preserves messages, and respects motion preferences", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.clock.install();
+  const conversation = {
+    id: "aaaaaaaaaaaaaaaaaaaaaaaa",
+    title: "Loading fixture",
+    messageCount: 2,
+  };
+  const messages = [
+    { id: "user-message", role: "user", content: "Check my usage" },
+    {
+      id: "assistant-message",
+      role: "assistant",
+      content: "First line\nSecond line",
+    },
+  ];
+  let count = 0,
+    finish;
+  const gate = new Promise((resolve) => {
+    finish = resolve;
+  });
+  await page.route(`${api}/ai/chat`, async (route) => {
+    count++;
+    await gate;
+    await route.fulfill({
+      json: {
+        conversation,
+        reasoning: "private-reasoning-fixture",
+        tool_calls: [{ arguments: "private-tool-fixture" }],
+      },
+    });
+  });
+  await page.route(`${api}/ai/conversations/${conversation.id}`, (route) =>
+    route.fulfill({ json: { conversation, messages } }),
+  );
+  await page.goto("/dashboard/assistant");
+  await page.getByLabel("Message the assistant").fill("Check my usage");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const activity = page
+    .locator(".assistant-activity")
+    .filter({ visible: true });
+  await expect(activity).toHaveAttribute("role", "status");
+  await expect(activity).toContainText("Waiting for a response");
+  expect(
+    await activity.evaluate((el) => !!el.closest('[aria-busy="true"]')),
+  ).toBe(false);
+  await page
+    .locator(".chat-composer form")
+    .filter({ visible: true })
+    .evaluate((form) => {
+      form.requestSubmit();
+      form.requestSubmit();
+    });
+  expect(count).toBe(1);
+  await expect(page.locator(".assistant-activity-dots i").first()).toHaveCSS(
+    "animation-name",
+    "assistant-wait",
+  );
+  await page.screenshot({
+    path: "test-results/assistant-wait-desktop.png",
+    fullPage: true,
+  });
+  await page.clock.fastForward(15001);
+  await expect(activity).toContainText("Still waiting for a response");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(page.locator(".assistant-activity-dots i").first()).toHaveCSS(
+    "animation-name",
+    "none",
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "test-results/assistant-wait-mobile.png",
+    fullPage: true,
+  });
+  finish();
+  await expect(
+    page.getByText("First line\nSecond line", { exact: true }),
+  ).toBeVisible();
+  await expect(activity).toBeHidden();
+  await expect(page.getByLabel("Message the assistant")).toHaveValue("");
+  await expect(
+    page.getByText(/private-reasoning-fixture|private-tool-fixture/),
+  ).toHaveCount(0);
+});
+
+test("assistant network recovery keeps draft and retries only on explicit submission", async ({
+  page,
+}) => {
+  await fixture(page);
+  let calls = 0;
+  await page.route(`${api}/ai/chat`, (route) => {
+    calls++;
+    return route.abort("failed");
+  });
+  await page.goto("/dashboard/assistant");
+  await page.getByLabel("Message the assistant").fill("Keep this question");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Refresh saved history" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Message the assistant")).toHaveValue(
+    "Keep this question",
+  );
+  await expect(page.getByLabel("Message the assistant")).toBeEnabled();
+  await page.getByRole("button", { name: "Refresh saved history" }).click();
+  expect(calls).toBe(1);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => calls).toBe(2);
+});
+
+test("assistant stop waiting is local, keeps draft, and does not replay", async ({
+  page,
+}) => {
+  await fixture(page);
+  let calls = 0;
+  await page.route(`${api}/ai/chat`, () => {
+    calls++;
+  });
+  await page.goto("/dashboard/assistant");
+  await page.getByLabel("Message the assistant").fill("A slow question");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => calls).toBe(1);
+  await page.getByRole("button", { name: "Stop waiting" }).click();
+  await expect(
+    page.getByText(/Stopped waiting. The server may still save a response/),
+  ).toBeVisible();
+  await expect(page.getByLabel("Message the assistant")).toBeEnabled();
+  await expect(page.getByLabel("Message the assistant")).toHaveValue(
+    "A slow question",
+  );
+  await expect(page.getByRole("button", { name: "Stop waiting" })).toHaveCount(
+    0,
+  );
+  expect(calls).toBe(1);
+});
+
+test("assistant client deadline clears activity and preserves the draft", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.clock.install();
+  await page.route(`${api}/ai/chat`, () => {});
+  await page.goto("/dashboard/assistant");
+  await page.getByLabel("Message the assistant").fill("Timed out question");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(
+    page.getByText("Waiting for a response", { exact: true }),
+  ).toBeVisible();
+  await page.clock.fastForward(90001);
+  await expect(
+    page.getByRole("button", { name: "Refresh saved history" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Message the assistant")).toBeEnabled();
+  await expect(page.getByLabel("Message the assistant")).toHaveValue(
+    "Timed out question",
+  );
+  await expect(
+    page.locator(".assistant-activity").filter({ visible: true }),
+  ).toHaveCount(0);
+});
+
 test("floating chat opens from login and preserves a draft across workspace navigation", async ({
   page,
 }) => {

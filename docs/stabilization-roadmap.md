@@ -75,7 +75,7 @@ guarantee is claimed during infrastructure failures.
 | Admin files          | Dedicated platform-admin authentication, safe uploader/company metadata, filename/uploader search, company/user/type/access filters, bounded server pagination and sorting | Task 2 implemented locally; real MongoDB query-performance smoke check pending                     |
 | Company file view    | Names, sizes/types, dates, uploader lookup, loading/empty/error states                                                                                                     | Server-side filters and pagination UX; current filtering/sorting uses fetched collections          |
 | Email                | Provider-neutral SMTP/Nodemailer and Resend senders, activation/resend/reset flows, local tests, Brevo settings in README                                                  | Run email/activation suites and an authorized real-delivery check                                  |
-| AI                   | OpenRouter primary and Gemini fallback, tool calling, server-controlled models, usage, timeouts, draft/error recovery, immediate loading UI                                | Accessible loading refinements; model-specific streaming research and compatibility checks         |
+| AI                   | OpenRouter primary and Gemini fallback, tool calling, server-controlled models, usage, timeouts, draft/error recovery, immediate loading UI                                | Task 4 loading/recovery implemented; streaming requires a separate reviewed backend change         |
 | Documentation        | Extensive backend/frontend READMEs, frontend feature audit and handoff                                                                                                     | Canonical topic docs and consistent links; distinguish dated live checks from current verification |
 | Agent guidance       | Root/frontend AGENTS.md, frontend CLAUDE.md references AGENTS.md                                                                                                           | Root CLAUDE.md and shared requirements referencing canonical docs                                  |
 | Licensing            | Backend package is private and UNLICENSED; no license file found                                                                                                           | Owner decides proprietary SaaS versus open-source distribution; legal review                       |
@@ -242,3 +242,87 @@ may scan many records, especially uploader joins without a company filter;
 review query plans before large-scale rollout. The selectors show up to 25
 server-filtered matches and explain how to narrow them. No SMTP, S3, billing,
 AI provider, production integration, push, deployment, or Phase 3 work occurred.
+
+## Phase 1 Task 4 — Assistant waiting experience
+
+Reviewed 2026-10-11 against a clean checkout following Task 2's committed
+implementation (`480cbae`). Uploads and admin Files were preserved.
+
+The assistant already had a synchronous in-flight submission guard, retained
+drafts on errors, persisted transcript reloads, safe API error messages, and a
+90-second browser request deadline. The shared workspace powers the floating
+assistant; `/dashboard/assistant` redirects into that interface. Existing
+pending feedback used a generic loader inside an `aria-busy` transcript.
+
+This frontend-only change adds a restrained animated three-dot indicator and
+an independent polite live region outside the busy transcript. Its labels
+reflect only a pending HTTP request: “Waiting for a response”, then “Still
+waiting for a response” after 15 seconds. It makes no claims about provider,
+tool, or reasoning stages. Reduced-motion users get a static indicator; hidden
+floating panels pause the animation. Existing history and multiline response
+rendering remain unchanged.
+
+“Stop waiting” aborts the browser request, keeps the draft, and explains that
+the server may still save the result. It does not cancel provider processing or
+reverse usage accounting. Interrupted/error states offer an explicit saved
+history refresh before manual resubmission; no automatic retries were added.
+Distinct send/stop button identities prevent abort completion from changing a
+clicked button into a submit button before its default click action finishes.
+
+### Streaming investigation
+
+Both OpenRouter and Gemini clients use `stream: false`; the controller returns
+one JSON result. The agent loop validates complete completions, executes scoped
+tools, pins fallback selection, accumulates usage, and commits the exchange.
+No intermediate processing events are available to the frontend.
+
+OpenRouter documents [SSE streaming](https://openrouter.ai/docs/api_reference/streaming)
+and [streamed tool calling](https://openrouter.ai/docs/guides/features/tool-calling).
+Its [reasoning interface](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)
+can include private reasoning fields or exclude them from output. None of those
+fields or tool arguments are needed for this animation, and none are displayed.
+
+Streaming is possible at the provider level but is not a frontend switch in
+DataVault. A future proposal must handle tool-call delta assembly, complete
+validation before execution, private-reasoning/signature boundaries, Gemini
+continuations and fallback after partial output, final usage accounting,
+transactional persistence, proxy SSE forwarding, cancellation semantics, and
+mid-stream errors. Configured-model streaming was not tested against live
+providers. This task intentionally preserves the non-streaming backend.
+
+### Local verification and limits
+
+| Check                                                                 | Result                    |
+| --------------------------------------------------------------------- | ------------------------- |
+| Backend AI unit tests (`npm test -- --runInBand src/ai`)              | 7 suites, 94 tests passed |
+| AI HTTP regression (`npm run test:e2e -- --runInBand ai.e2e-spec.ts`) | 7 tests passed            |
+| Focused assistant Playwright regressions                              | 8 tests passed            |
+| Frontend production build (`npm run build -- --webpack`)              | Passed                    |
+| Repository ESLint, changed-file Prettier, Git whitespace check        | Passed                    |
+| Desktop and 390px mobile waiting screenshots                          | Visually checked          |
+
+The browser selection, from `frontend/`, was:
+
+```sh
+npm test -- tests/workspace.spec.js --grep 'assistant|AI disabled|AI conversations|floating chat|workspace animations'
+```
+
+Browser API fixtures cover immediate feedback, duplicate form submissions,
+long waits, reduced motion, mobile layout, transcript formatting, unused private
+response fields, network failure/manual retry, local stop without replay, and
+the 90-second client deadline. Existing animation, history continuation/deletion,
+disabled-service, and floating-draft regressions remain covered. Backend AI
+unit/HTTP tests use isolated provider/database substitutes; they are not live
+OpenRouter/Gemini integration checks. Full repository suites are outside this
+scoped task. Production provider selection, quotas, billing, and tenant
+isolation have no code changes.
+
+The frontend has no separate lint script or configured JavaScript ESLint gate;
+repository backend lint and frontend production build/formatting are reported
+separately. Browser verification uses a temporary Chromium localhost-to-IPv4
+resolver rule to avoid an unrelated application's IPv6 listener on port 3000;
+no repository test configuration or unrelated process was modified.
+
+The UI detector reported two pre-existing global stylesheet advisories for a
+width transition and a decorative grid background, outside this task's changed
+rules. No new design-detector finding appeared in the waiting UI.
