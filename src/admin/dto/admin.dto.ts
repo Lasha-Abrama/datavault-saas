@@ -165,6 +165,15 @@ export class AdminFileQueryDto extends AdminPaginationDto {
   @IsOptional()
   @IsString()
   @Length(1, 80)
+  uploaderSearch?: string;
+  @ApiPropertyOptional({ pattern: '^[a-fA-F0-9]{24}$' })
+  @IsOptional()
+  @IsMongoId()
+  userId?: string;
+  @ApiPropertyOptional({ minLength: 1, maxLength: 80 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
   search?: string;
   @ApiPropertyOptional({ pattern: '^[a-fA-F0-9]{24}$' })
   @IsOptional()

@@ -367,6 +367,59 @@ describe('platform-admin / tenant security boundary (e2e, mocked infrastructure)
     expect(storage.getObject).not.toHaveBeenCalled();
   });
 
+  it('validates and protects file identity searches, filters and sorts', async () => {
+    const userId = (f.users[1]._id as Types.ObjectId).toString();
+    const query = `/admin/files?companyId=${betaId()}&userId=${userId}&search=sheet&uploaderSearch=owner1%40&limit=1&page=2&sortBy=originalFilename&order=asc`;
+    await request(app.getHttpServer())
+      .get(query)
+      .set(auth())
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) =>
+        expect(body).toMatchObject({
+          items: [
+            {
+              originalFilename: 'sheet2.csv',
+              uploader: { email: 'owner1@fixture.test' },
+              company: { name: 'Beta' },
+            },
+          ],
+          pagination: { total: 2, page: 2, limit: 1 },
+        }),
+      );
+    await request(app.getHttpServer()).get(query).expect(401);
+    await request(app.getHttpServer())
+      .get(query)
+      .set({ Authorization: `Bearer ${otherOwnerToken}` })
+      .expect(401);
+    for (const invalid of [
+      'userId=bad',
+      'companyId=bad',
+      'uploaderSearch=' + 'x'.repeat(81),
+      'sortBy=password',
+      'limit=101',
+      'page=0',
+    ])
+      await request(app.getHttpServer())
+        .get(`/admin/files?${invalid}`)
+        .set(auth())
+        .expect(400);
+    await request(app.getHttpServer())
+      .get(
+        `/admin/files?companyId=${(f.companies[0]._id as Types.ObjectId).toString()}&userId=${userId}`,
+      )
+      .set(auth())
+      .expect(200)
+      .expect(({ body }: { body: { pagination: { total: number } } }) =>
+        expect(body.pagination.total).toBe(0),
+      );
+    await request(app.getHttpServer())
+      .delete(
+        `/admin/files/${(f.companyfiles[0]._id as Types.ObjectId).toString()}`,
+      )
+      .set(auth())
+      .expect(404);
+  });
+
   it('suspension blocks fresh owner/member/Google login and existing JWTs without changing billing or data', async () => {
     const preserved = JSON.stringify([
       f.users,

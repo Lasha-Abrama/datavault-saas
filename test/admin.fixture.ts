@@ -153,6 +153,11 @@ function aggregate(
       rows = rows.slice(0, Number(stage.$limit));
     else if (stage.$project)
       rows = rows.map((row) => project(row, stage.$project as Row));
+    else if (stage.$addFields)
+      rows = rows.map((row) => ({
+        ...row,
+        ...project(row, stage.$addFields as Row),
+      }));
     else if (stage.$count)
       rows = rows.length ? [{ [stage.$count as string]: rows.length }] : [];
     else if (stage.$lookup) {

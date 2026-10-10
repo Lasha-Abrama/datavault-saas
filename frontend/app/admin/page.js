@@ -18,6 +18,7 @@ import {
   validNewPassword,
 } from "@/lib/password-policy";
 import "./platform.css";
+import AdminFiles from "@/components/admin/admin-files";
 
 const key = "datavault.platform.session";
 const tabs = [
@@ -77,9 +78,10 @@ async function loadDirectory(path, token, audit) {
   };
 }
 
-async function api(path, { token, method = "GET", body } = {}) {
+async function api(path, { token, method = "GET", body, signal } = {}) {
   const response = await fetch(`/backend/admin/${path}`, {
     method,
+    signal,
     cache: "no-store",
     headers: {
       ...(body ? { "Content-Type": "application/json" } : {}),
@@ -122,6 +124,7 @@ export default function PlatformAdmin() {
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [confirmation, setConfirmation] = useState(null);
+  const [fileUser, setFileUser] = useState(null);
   useEffect(() => {
     function openAccessLink() {
       const fragment = new URLSearchParams(window.location.hash.slice(1));
@@ -186,7 +189,7 @@ export default function PlatformAdmin() {
     return () => window.removeEventListener("hashchange", openAccessLink);
   }, []);
   useEffect(() => {
-    if (!token) return;
+    if (!token || tab === 3) return;
     let active = true;
     setData(null);
     setError("");
@@ -677,6 +680,8 @@ export default function PlatformAdmin() {
                 setSearch("");
                 setDraft("");
                 setDetail(null);
+                setFileUser(null);
+                setError("");
               }}
             >
               {name}
@@ -707,7 +712,7 @@ export default function PlatformAdmin() {
             {notice}
           </p>
         )}
-        {tab > 0 && tab < 4 && (
+        {tab > 0 && tab < 3 && (
           <form
             className="platform-search"
             onSubmit={(event) => {
@@ -726,7 +731,14 @@ export default function PlatformAdmin() {
             <Button variant="secondary">Search</Button>
           </form>
         )}
-        {!data ? (
+        {tab === 3 ? (
+          <AdminFiles
+            token={token}
+            load={api}
+            initialUser={fileUser}
+            onUnauthorized={logout}
+          />
+        ) : !data ? (
           <Loading label={`Loading ${tabs[tab].toLowerCase()}`} />
         ) : tab === 0 ? (
           <div className="platform-overview">
@@ -903,6 +915,24 @@ export default function PlatformAdmin() {
                       <span>
                         {tab === 1 ? item.platformStatus : date(item.createdAt)}
                       </span>
+                    )}
+                    {tab === 2 && (
+                      <button
+                        type="button"
+                        className="platform-text-button"
+                        onClick={() => {
+                          setFileUser(item);
+                          setTab(3);
+                          setDetail(null);
+                          setError("");
+                        }}
+                      >
+                        View files
+                        <span className="sr-only">
+                          {" "}
+                          for {item.fullName || item.email}
+                        </span>
+                      </button>
                     )}
                     {tab === 1 && (
                       <button

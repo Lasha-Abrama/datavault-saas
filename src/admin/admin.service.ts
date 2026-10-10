@@ -63,6 +63,8 @@ const userProjection = {
   createdAt: 1,
 };
 const fileProjection = {
+  uploader: 1,
+  company: { $ifNull: ['$company', null] },
   _id: 0,
   id: '$_id',
   companyId: 1,
@@ -143,6 +145,7 @@ export class AdminService {
     projection: Record<string, unknown>,
     sortBy: string,
     allowedSorts: readonly string[],
+    itemPipeline: PipelineStage.FacetPipelineStage[] = [],
   ) {
     if (
       !Number.isInteger(query.page) ||
@@ -165,6 +168,7 @@ export class AdminService {
             items: [
               { $skip: (query.page - 1) * query.limit },
               { $limit: query.limit },
+              ...itemPipeline,
               { $project: projection },
             ],
             total: [{ $count: 'count' }],
@@ -564,9 +568,47 @@ export class AdminService {
     );
   }
 
+  private fileUploaderLookup(): PipelineStage.FacetPipelineStage[] {
+    return [
+      {
+        $lookup: {
+          from: this.users.collection.name,
+          localField: 'uploaderId',
+          foreignField: '_id',
+          as: 'uploader',
+          pipeline: [
+            {
+              $project: {
+                _id: 0,
+                id: '$_id',
+                fullName: 1,
+                email: 1,
+                companyId: 1,
+              },
+            },
+          ],
+        },
+      },
+      { $unwind: { path: '$uploader', preserveNullAndEmptyArrays: true } },
+      // Corrupt or stale cross-company references must not disclose another tenant's identity.
+      {
+        $addFields: {
+          uploader: {
+            $cond: [
+              { $eq: ['$uploader.companyId', '$companyId'] },
+              '$uploader',
+              null,
+            ],
+          },
+        },
+      },
+    ];
+  }
+
   listFiles(query: AdminFileQueryDto) {
     const match: Record<string, unknown> = {};
     if (query.companyId) match.companyId = new Types.ObjectId(query.companyId);
+    if (query.userId) match.uploaderId = new Types.ObjectId(query.userId);
     if (query.search) match.originalFilename = this.search(query.search);
     if (query.fileType) match.fileType = query.fileType;
     if (query.visibility === CompanyFileVisibility.RESTRICTED)
@@ -576,13 +618,36 @@ export class AdminService {
         { visibility: query.visibility },
         { visibility: { $exists: false } },
       ];
+    const pipeline: PipelineStage[] = [{ $match: match }];
+    if (query.uploaderSearch)
+      pipeline.push(...this.fileUploaderLookup(), {
+        $match: {
+          $or: [
+            { 'uploader.fullName': this.search(query.uploaderSearch) },
+            { 'uploader.email': this.search(query.uploaderSearch) },
+          ],
+        },
+      });
     return this.page(
       this.files,
       query,
-      [{ $match: match }],
+      pipeline,
       fileProjection,
       query.sortBy,
       ['createdAt', 'originalFilename', 'size'],
+      [
+        ...(query.uploaderSearch ? [] : this.fileUploaderLookup()),
+        {
+          $lookup: {
+            from: this.companies.collection.name,
+            localField: 'companyId',
+            foreignField: '_id',
+            as: 'company',
+            pipeline: [{ $project: { _id: 0, id: '$_id', name: 1 } }],
+          },
+        },
+        { $unwind: { path: '$company', preserveNullAndEmptyArrays: true } },
+      ],
     );
   }
 

@@ -176,6 +176,76 @@ describe('platform operational administration', () => {
     ).toBe(1);
   });
 
+  it('searches filename and uploader literally, combines user/company filters, and paginates stable sorts', async () => {
+    const companyId = (f.companies[1]._id as Types.ObjectId).toString();
+    const userId = (f.users[1]._id as Types.ObjectId).toString();
+    const query: AdminFileQueryDto = Object.assign(new AdminFileQueryDto(), {
+      companyId,
+      userId,
+      search: 'sheet',
+      uploaderSearch: 'OWNER1@',
+      sortBy: 'originalFilename',
+      order: 'asc',
+      limit: 1,
+      page: 2,
+    });
+    const result = await f.service.listFiles(query);
+    expect(result).toMatchObject({
+      pagination: { total: 2, page: 2, limit: 1 },
+      items: [
+        {
+          originalFilename: 'sheet2.csv',
+          uploader: { id: f.users[1]._id, email: 'owner1@fixture.test' },
+          company: { id: f.companies[1]._id, name: 'Beta' },
+        },
+      ],
+    });
+    query.uploaderSearch = String(f.users[1].fullName);
+    expect((await f.service.listFiles(query)).pagination.total).toBe(2);
+    query.search = '.*';
+    expect((await f.service.listFiles(query)).pagination.total).toBe(0);
+    query.search = 'sheet';
+    query.uploaderSearch = '.*';
+    expect((await f.service.listFiles(query)).pagination.total).toBe(0);
+    query.uploaderSearch = undefined;
+    query.companyId = (f.companies[0]._id as Types.ObjectId).toString();
+    expect((await f.service.listFiles(query)).pagination.total).toBe(0);
+    query.companyId = companyId;
+    query.page = 1;
+    query.sortBy = 'size';
+    query.order = 'desc';
+    f.companyfiles[2].size = 999;
+    expect(await f.service.listFiles(query)).toMatchObject({
+      items: [{ size: 999 }],
+    });
+  });
+
+  it('keeps unavailable relations visible but hides identities from cross-company uploader references', async () => {
+    f.companyfiles[0].uploaderId = f.users[1]._id;
+    f.companyfiles[2].uploaderId = new Types.ObjectId();
+    const result = await f.service.listFiles(new AdminFileQueryDto());
+    expect(result.pagination.total).toBe(3);
+    expect(result.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: f.companyfiles[0]._id, uploader: null }),
+        expect.objectContaining({ id: f.companyfiles[2]._id, uploader: null }),
+      ]),
+    );
+    const matching = await f.service.listFiles(
+      Object.assign(new AdminFileQueryDto(), { uploaderSearch: 'owner1@' }),
+    );
+    expect(matching.pagination.total).toBe(1);
+    expect(JSON.stringify(result)).not.toMatch(
+      /password|hidden-|storageKey|tokenHash/,
+    );
+    f.companies.splice(1, 1);
+    expect((await f.service.listFiles(new AdminFileQueryDto())).items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: f.companyfiles[1]._id, company: null }),
+      ]),
+    );
+  });
+
   it('atomically suspends/reactivates only the Company and append-only audit data', async () => {
     const id = (f.companies[1]._id as Types.ObjectId).toString();
     const preserved = JSON.stringify([

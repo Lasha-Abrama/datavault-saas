@@ -69,17 +69,17 @@ guarantee is claimed during infrastructure failures.
 
 ## Existing feature status
 
-| Area                 | Existing implementation                                                                                                                                      | Remaining work                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| Files                | CSV/XLS/XLSX structural/content validation, private tenant keys, streamed downloads, company-wide/restricted visibility, uploader/owner mutation permissions | Live batch smoke check; infrastructure reconciliation review                                       |
-| Admin files          | Dedicated platform-admin authentication, explicit metadata projection, filename search, company/type/visibility filters, bounded pagination and sorting      | Uploader identity display/search/filter; verify UI relationship clarity                            |
-| Company file view    | Names, sizes/types, dates, uploader lookup, loading/empty/error states                                                                                       | Server-side filters and pagination UX; current filtering/sorting uses fetched collections          |
-| Email                | Provider-neutral SMTP/Nodemailer and Resend senders, activation/resend/reset flows, local tests, Brevo settings in README                                    | Run email/activation suites and an authorized real-delivery check                                  |
-| AI                   | OpenRouter primary and Gemini fallback, tool calling, server-controlled models, usage, timeouts, draft/error recovery, immediate loading UI                  | Accessible loading refinements; model-specific streaming research and compatibility checks         |
-| Documentation        | Extensive backend/frontend READMEs, frontend feature audit and handoff                                                                                       | Canonical topic docs and consistent links; distinguish dated live checks from current verification |
-| Agent guidance       | Root/frontend AGENTS.md, frontend CLAUDE.md references AGENTS.md                                                                                             | Root CLAUDE.md and shared requirements referencing canonical docs                                  |
-| Licensing            | Backend package is private and UNLICENSED; no license file found                                                                                             | Owner decides proprietary SaaS versus open-source distribution; legal review                       |
-| Sensitive Data Guard | File validation only; no dedicated inspection/redaction policies or workflow found                                                                           | Architecture, threat model, approval, then controlled implementation                               |
+| Area                 | Existing implementation                                                                                                                                                    | Remaining work                                                                                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Files                | CSV/XLS/XLSX structural/content validation, private tenant keys, streamed downloads, company-wide/restricted visibility, uploader/owner mutation permissions               | Live batch smoke check; infrastructure reconciliation review                                       |
+| Admin files          | Dedicated platform-admin authentication, safe uploader/company metadata, filename/uploader search, company/user/type/access filters, bounded server pagination and sorting | Task 2 implemented locally; real MongoDB query-performance smoke check pending                     |
+| Company file view    | Names, sizes/types, dates, uploader lookup, loading/empty/error states                                                                                                     | Server-side filters and pagination UX; current filtering/sorting uses fetched collections          |
+| Email                | Provider-neutral SMTP/Nodemailer and Resend senders, activation/resend/reset flows, local tests, Brevo settings in README                                                  | Run email/activation suites and an authorized real-delivery check                                  |
+| AI                   | OpenRouter primary and Gemini fallback, tool calling, server-controlled models, usage, timeouts, draft/error recovery, immediate loading UI                                | Accessible loading refinements; model-specific streaming research and compatibility checks         |
+| Documentation        | Extensive backend/frontend READMEs, frontend feature audit and handoff                                                                                                     | Canonical topic docs and consistent links; distinguish dated live checks from current verification |
+| Agent guidance       | Root/frontend AGENTS.md, frontend CLAUDE.md references AGENTS.md                                                                                                           | Root CLAUDE.md and shared requirements referencing canonical docs                                  |
+| Licensing            | Backend package is private and UNLICENSED; no license file found                                                                                                           | Owner decides proprietary SaaS versus open-source distribution; legal review                       |
+| Sensitive Data Guard | File validation only; no dedicated inspection/redaction policies or workflow found                                                                                         | Architecture, threat model, approval, then controlled implementation                               |
 
 Platform administrators and company owners are separate identities. Existing
 platform file listing exposes projected metadata; do not infer unrestricted
@@ -91,17 +91,17 @@ access remains scoped by company and visibility.
 Complexity is relative, not a delivery-date commitment. Each row should be a
 separate reviewable change, with relevant tests passing before the next step.
 
-| Order | Work and likely files                                                                             | Complexity / dependencies                                                                             | Main risk                                                                       | Acceptance gate                                                                                                                                                 |
-| ----- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Multiple uploads: contributor dialog, safety helpers, unit/browser/HTTP tests                     | Medium; existing endpoint                                                                             | Replay after uncertain commits, partial quota exhaustion                        | Multi-select/drop, individual results/progress, retry rejection only, stop/continue, duplicate guards, preserved single upload and security                     |
-| 2     | Admin file relationships: admin DTO/service, admin page, company file query DTO/service/UI, tests | Medium; clarify each admin scope before queries                                                       | Cross-tenant access or excessive identity disclosure                            | Server-side name/uploader search, authorized user/company filters, stable pagination/sort, scoped download/delete regression tests                              |
-| 3     | Transactional email: email/auth tests and existing README configuration                           | Small–medium; authorized recipient/environment for live check                                         | Credential exposure, token reuse, account enumeration                           | Signup/activation/resend/reset failures and successes verified; real delivery reported separately                                                               |
-| 4     | AI loading: assistant components/styles, provider clients only if needed, AI tests                | Medium; official OpenRouter streaming/reasoning research and configured-model capability verification | Breaking tool loops/fallback, misleading progress, private reasoning disclosure | Immediate accessible feedback, reduced-motion support, timeout/cancel recovery, preserved tools/fallback; only actual public processing states                  |
-| 5     | Documentation: docs topics, root/frontend README links, AGENTS.md, root CLAUDE.md                 | Medium; confirmed implementation                                                                      | Contradictory guidance, outdated integration claims                             | Overview/architecture, environment placeholders, auth/RBAC/tenancy, storage, Stripe, OAuth, SMTP, AI, Swagger, test/deploy/troubleshooting coverage             |
-| 6     | License and legal readiness: distribution-decision note and clearly labeled drafts                | Small–medium; owner/legal decisions                                                                   | Unintended license grant or unsupported legal claims                            | Compare proprietary licensing with open-source options without selecting a license automatically; Terms/Privacy/license reviewed by owner/legal                 |
-| 7     | Sensitive Data Guard architecture and threat model under docs                                     | Large; owner policy, privacy, retention and deployment decisions                                      | Sensitive data leakage, hostile workbooks, incomplete sanitization              | Architecture/security review and approval before significant schemas or external integrations                                                                   |
-| 8     | Optional Guard policies/import, scan/review/redaction, audit and RBAC in separate changes         | Large; approved row 7                                                                                 | False positives/negatives, destructive workbook edits, tenant leaks             | Deterministic structured checks, validated policy import, explicit workbook coverage/limitations, sanitized-copy validation, malicious-file and isolation tests |
-| 9     | Final release verification using repository CI and deployment checks                              | Medium–large; implemented phases and authorized environment                                           | Treating mocks as live integration evidence                                     | Formatting/lint/build/unit/HTTP/browser/security checks plus auth/RBAC/tenancy/storage/email/AI regressions; exact outstanding live checks recorded             |
+| Order | Work and likely files                                                                     | Complexity / dependencies                                                                             | Main risk                                                                       | Acceptance gate                                                                                                                                                 |
+| ----- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | Multiple uploads: contributor dialog, safety helpers, unit/browser/HTTP tests             | Medium; existing endpoint                                                                             | Replay after uncertain commits, partial quota exhaustion                        | Multi-select/drop, individual results/progress, retry rejection only, stop/continue, duplicate guards, preserved single upload and security                     |
+| 2     | Admin Files (Task 2): admin DTO/service, dedicated admin UI, tests; completed locally     | Medium; clarify each admin scope before queries                                                       | Cross-tenant access or excessive identity disclosure                            | Server-side name/uploader search, authorized user/company filters, stable pagination/sort, scoped download/delete regression tests                              |
+| 3     | Transactional email: email/auth tests and existing README configuration                   | Small–medium; authorized recipient/environment for live check                                         | Credential exposure, token reuse, account enumeration                           | Signup/activation/resend/reset failures and successes verified; real delivery reported separately                                                               |
+| 4     | AI loading: assistant components/styles, provider clients only if needed, AI tests        | Medium; official OpenRouter streaming/reasoning research and configured-model capability verification | Breaking tool loops/fallback, misleading progress, private reasoning disclosure | Immediate accessible feedback, reduced-motion support, timeout/cancel recovery, preserved tools/fallback; only actual public processing states                  |
+| 5     | Documentation: docs topics, root/frontend README links, AGENTS.md, root CLAUDE.md         | Medium; confirmed implementation                                                                      | Contradictory guidance, outdated integration claims                             | Overview/architecture, environment placeholders, auth/RBAC/tenancy, storage, Stripe, OAuth, SMTP, AI, Swagger, test/deploy/troubleshooting coverage             |
+| 6     | License and legal readiness: distribution-decision note and clearly labeled drafts        | Small–medium; owner/legal decisions                                                                   | Unintended license grant or unsupported legal claims                            | Compare proprietary licensing with open-source options without selecting a license automatically; Terms/Privacy/license reviewed by owner/legal                 |
+| 7     | Sensitive Data Guard architecture and threat model under docs                             | Large; owner policy, privacy, retention and deployment decisions                                      | Sensitive data leakage, hostile workbooks, incomplete sanitization              | Architecture/security review and approval before significant schemas or external integrations                                                                   |
+| 8     | Optional Guard policies/import, scan/review/redaction, audit and RBAC in separate changes | Large; approved row 7                                                                                 | False positives/negatives, destructive workbook edits, tenant leaks             | Deterministic structured checks, validated policy import, explicit workbook coverage/limitations, sanitized-copy validation, malicious-file and isolation tests |
+| 9     | Final release verification using repository CI and deployment checks                      | Medium–large; implemented phases and authorized environment                                           | Treating mocks as live integration evidence                                     | Formatting/lint/build/unit/HTTP/browser/security checks plus auth/RBAC/tenancy/storage/email/AI regressions; exact outstanding live checks recorded             |
 
 ## Sensitive Data Guard design gate
 
@@ -177,3 +177,68 @@ Changes are ready for a scoped commit following owner review. No commit, push,
 deployment, secret change, stash application/deletion, or admin Files task was
 performed. The next roadmap item remains pending; Phase 3 implementation still
 requires architecture/security approval.
+
+## Phase 1 Task 2 — Platform admin Files
+
+Local verification on 2026-10-10:
+
+| Check                                                       | Result                                   |
+| ----------------------------------------------------------- | ---------------------------------------- |
+| Admin service/security and file service unit tests          | 3 suites, 43 tests passed                |
+| Admin and file HTTP regression tests                        | 2 suites, 50 tests passed                |
+| Admin Files and existing admin UI Playwright tests          | 5 tests passed                           |
+| Backend formatting check, ESLint, and Nest build            | Passed                                   |
+| Frontend webpack production build and changed-file Prettier | Passed                                   |
+| Git whitespace check and admin UI detector                  | Passed; detector returned no findings    |
+| Desktop and 390px mobile screenshots                        | Visually checked; table scroll contained |
+
+Browser tests used an ephemeral configuration with `http://127.0.0.1:3000`
+because an unrelated application's IPv6 localhost listener occupied the same
+port. That application was left running and repository test configuration was
+not changed. The frontend package has no separate lint command; its production
+build and formatting checks passed. The full repository suites were not rerun
+for this scoped task.
+
+Task 1 was already committed as `84478b3` when Task 2 began, with a clean
+working tree. Its upload implementation and the earlier roadmap were preserved.
+The reconciliation verification above records the earlier task, not current
+Task 2 production verification.
+
+The platform Files endpoint already had filename/company/type/access filters,
+bounded pagination, stable sorting, explicit metadata projection, and a separate
+platform-admin guard. The UI displayed only filename, format, and date; uploader
+and company relationships, filter controls, and recoverable list errors were
+missing. The platform-admin role authorizes metadata across companies. Company
+owners and members cannot use this endpoint. Supplied company IDs only filter
+that already-authorized scope; they never confer authorization.
+
+Task 2 adds literal case-insensitive uploader name/email search and an exact
+uploader ID filter. Results include only uploader name/email/ID and company
+name/ID alongside existing file metadata. Missing relationships remain visible
+with fallback labels; a cross-company uploader reference returns no joined
+identity. No storage keys or user credentials are projected. Except when
+uploader search requires a join before filtering, identity/company joins run
+only for the selected page. Existing query limits and the five-second database
+timeout remain in place. No schema or dependency changes were needed.
+
+The Files UI shows name/type, size, upload time, uploader identity, company,
+existing access visibility, and user-file drilldown. Separate filename/uploader
+searches combine with searchable, bounded user/company selectors, format/access
+filters, sorting, and page size. Selected users can also open their files from
+the Users tab. Loading, empty, retryable error, and expired-session states are
+explicit. Requests are aborted on filter changes/unmount; obsolete responses
+cannot replace newer results. The responsive table scrolls within its own
+keyboard-accessible region.
+
+Download, deletion, and access mutations still use the existing company
+workspace and tenant authorization. Platform administration remains a metadata
+directory; no new file-content or deletion privilege was added. The company
+workspace's separate collection filtering remains outside Task 2.
+
+Verification uses isolated HTTP database/storage substitutes and browser API
+fixtures. Live MongoDB query plans and production-scale substring-search
+latency have not been measured. Unanchored case-insensitive substring searches
+may scan many records, especially uploader joins without a company filter;
+review query plans before large-scale rollout. The selectors show up to 25
+server-filtered matches and explain how to narrow them. No SMTP, S3, billing,
+AI provider, production integration, push, deployment, or Phase 3 work occurred.
