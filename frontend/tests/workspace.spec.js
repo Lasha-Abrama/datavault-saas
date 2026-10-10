@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { mkdir, writeFile } from "node:fs/promises";
 
 // Deliberately synthetic credentials, used only by intercepted test requests.
 const oauthCode = "o".repeat(43);
@@ -1103,6 +1104,18 @@ const batchFiles = (count) =>
     buffer: Buffer.from(`id,value\n${index + 1},synthetic\n`),
   }));
 
+// Real disk fixtures retain lastModified across picker selections.
+async function stableUploadFiles(testInfo, names) {
+  await mkdir(testInfo.outputDir, { recursive: true });
+  return Promise.all(
+    names.map(async (name) => {
+      const path = testInfo.outputPath(name);
+      await writeFile(path, "a,b\n1,2");
+      return path;
+    }),
+  );
+}
+
 test("multiple selected files upload separately with the same permissions", async ({
   page,
 }) => {
@@ -1173,7 +1186,9 @@ test("Free rejects an oversized selection before sending any file", async ({
   await expect(
     dialog.getByRole("button", { name: "Upload 10 files" }),
   ).toBeEnabled();
-  await page.getByLabel("Choose files").setInputFiles(batchFiles(1));
+  await page
+    .getByLabel("Choose files")
+    .setInputFiles([{ ...batchFiles(1)[0], name: "extra.csv" }]);
   await expect(dialog).toContainText("Only 0 more files fit");
   await expect(dialog.getByRole("listitem")).toHaveCount(10);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1231,7 +1246,7 @@ test("partial batch failure preserves results and retries only unfinished files"
     attempts.push(route.request().postData());
     return route.fulfill(
       attempts.length === 2
-        ? { status: 503, json: { message: "Private storage failure" } }
+        ? { status: 403, json: {} }
         : { status: 201, json: files[0] },
     );
   });
@@ -1246,13 +1261,102 @@ test("partial batch failure preserves results and retries only unfinished files"
   await expect(dialog).toContainText(
     "1 file was uploaded; 1 file needs attention",
   );
-  await expect(dialog).toContainText("File storage is temporarily unavailable");
+  await expect(dialog).toContainText("plan limit has been reached");
   expect(attempts).toHaveLength(2);
   await dialog.getByRole("button", { name: "Upload 2 files" }).click();
   await expect(page.getByText("2 files added to your vault")).toBeVisible();
   expect(attempts).toHaveLength(4);
   expect(attempts[2]).toContain('filename="batch-2.csv"');
   expect(attempts[3]).toContain('filename="batch-3.csv"');
+});
+
+test("multiple uploads preserve successes, deduplicate selection and retry only failed files", async ({
+  page,
+}, testInfo) => {
+  await fixture(page);
+  const attempts = [];
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route(`${api}/files`, async (route) => {
+    const name = /filename="([^"]+)"/.exec(route.request().postData())[1];
+    attempts.push(name);
+    if (name === "first.csv") await gate;
+    const failed =
+      name === "second.csv" &&
+      attempts.filter((item) => item === name).length === 1;
+    await route.fulfill({
+      status: failed ? 400 : 201,
+      json: failed ? {} : files[0],
+    });
+  });
+  await page.goto("/dashboard/files");
+  await page
+    .getByRole("button", { name: "Upload file", exact: true })
+    .first()
+    .click();
+  const selected = await stableUploadFiles(testInfo, [
+    "first.csv",
+    "second.csv",
+    "third.csv",
+  ]);
+  await page.getByLabel("Choose files").setInputFiles(selected);
+  await page.getByLabel("Choose files").setInputFiles(selected);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.locator(".upload-queue li")).toHaveCount(3);
+  await page.getByRole("radio", { name: /Selected employees only/ }).check();
+  await page.getByRole("checkbox", { name: /Sam Lee/ }).check();
+  const button = dialog.getByRole("button", {
+    name: "Upload 3 files",
+    exact: true,
+  });
+  // Dispatch twice within one render to exercise the synchronous submission guard.
+  await button.evaluate((button) => {
+    button.click();
+    button.click();
+  });
+  await expect.poll(() => attempts.length).toBe(1);
+  await expect(dialog.locator(".modal-actions button")).toBeDisabled();
+  await expect(
+    page.getByRole("radio", { name: /Selected employees only/ }),
+  ).toBeDisabled();
+  await expect(
+    dialog.getByRole("progressbar", {
+      name: "Upload progress for first.csv",
+      exact: true,
+    }),
+  ).toHaveCount(1);
+  release();
+  await expect(
+    dialog.getByRole("button", { name: "Upload file" }),
+  ).toBeEnabled();
+  await expect(
+    dialog.getByRole("status").filter({ hasText: /Uploaded/ }),
+  ).toHaveCount(2);
+  expect(attempts).toEqual(["first.csv", "second.csv", "third.csv"]);
+  await page.screenshot({
+    path: "test-results/upload-batch-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+    )
+    .toBe(true);
+  await page.screenshot({
+    path: "test-results/upload-batch-mobile.png",
+    fullPage: true,
+  });
+  await dialog.getByRole("button", { name: "Upload file" }).click();
+  await expect(dialog).not.toBeVisible();
+  expect(attempts).toEqual([
+    "first.csv",
+    "second.csv",
+    "third.csv",
+    "second.csv",
+  ]);
 });
 
 for (const [index, limit] of [
@@ -1690,4 +1794,163 @@ test("floating chat opens from login and preserves a draft across workspace navi
   expect(panel.x + panel.width).toBeLessThanOrEqual(390);
   expect(panel.y).toBeGreaterThanOrEqual(0);
   expect(panel.y + panel.height).toBeLessThanOrEqual(844);
+});
+
+for (const response of ["network", 500, 503, 504]) {
+  test(`batch keeps ${response} outcomes out of retries and reselection`, async ({
+    page,
+  }, testInfo) => {
+    await fixture(page);
+    const attempts = [];
+    await page.route(`${api}/files`, (route) => {
+      attempts.push(/filename="([^"]+)"/.exec(route.request().postData())[1]);
+      if (attempts.length === 1)
+        return response === "network"
+          ? route.abort("failed")
+          : route.fulfill({ status: response, json: {} });
+      return route.fulfill({ status: 201, json: files[0] });
+    });
+    await page.goto("/dashboard/files");
+    await page
+      .getByRole("button", { name: "Upload file", exact: true })
+      .first()
+      .click();
+    const selected = await stableUploadFiles(testInfo, [
+      "batch-1.csv",
+      "batch-2.csv",
+    ]);
+    await page.getByLabel("Choose files").setInputFiles(selected);
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Upload 2 files" }).click();
+    await expect(dialog).toContainText("may already have been saved");
+    expect(attempts).toEqual(["batch-1.csv"]);
+    await expect(
+      dialog.getByRole("button", { name: "Remove batch-1.csv" }),
+    ).toHaveCount(0);
+    await page.getByLabel("Choose files").setInputFiles(selected);
+    await expect(dialog.getByRole("listitem")).toHaveCount(2);
+    await dialog
+      .getByRole("button", { name: "Upload file", exact: true })
+      .click();
+    await expect(
+      dialog.getByRole("status").filter({ hasText: /Uploaded/ }),
+    ).toHaveCount(1);
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "Upload files", exact: true }),
+    ).toBeDisabled();
+    expect(attempts).toEqual(["batch-1.csv", "batch-2.csv"]);
+  });
+}
+
+test("batch drop rejects mixed invalid selection and cancellation keeps later files ready", async ({
+  page,
+}) => {
+  await fixture(page);
+  let calls = 0;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route(`${api}/files`, async (route) => {
+    calls++;
+    if (calls === 1) await gate;
+    await route.fulfill({ status: 201, json: files[0] }).catch(() => {});
+  });
+  await page.goto("/dashboard/files");
+  await page
+    .getByRole("button", { name: "Upload file", exact: true })
+    .first()
+    .click();
+  const transfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    for (const name of ["first.csv", "later.csv"])
+      data.items.add(
+        new File(["a,b"], name, { type: "text/csv", lastModified: 1 }),
+      );
+    return data;
+  });
+  const invalid = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    for (const name of ["valid.csv", "invalid.pdf"])
+      data.items.add(new File(["a,b"], name, { type: "text/csv" }));
+    return data;
+  });
+  await page
+    .locator(".dropzone")
+    .dispatchEvent("drop", { dataTransfer: invalid });
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("empty or unsupported");
+  await expect(dialog.getByRole("listitem")).toHaveCount(0);
+  await page
+    .locator(".dropzone")
+    .dispatchEvent("drop", { dataTransfer: transfer });
+  await expect(dialog.getByRole("listitem")).toHaveCount(2);
+  await dialog.getByRole("button", { name: "Upload 2 files" }).click();
+  await expect.poll(() => calls).toBe(1);
+  await dialog.getByRole("button", { name: "Stop uploads" }).click();
+  await expect(dialog).toContainText("may already have been saved");
+  await expect(
+    dialog.getByRole("status").filter({ hasText: /Ready/ }),
+  ).toHaveCount(1);
+  await page
+    .locator(".dropzone")
+    .dispatchEvent("drop", { dataTransfer: transfer });
+  await expect(dialog.getByRole("listitem")).toHaveCount(2);
+  expect(calls).toBe(1);
+  release();
+  await dialog
+    .getByRole("button", { name: "Upload file", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("status").filter({ hasText: /Uploaded/ }),
+  ).toHaveCount(1);
+  expect(calls).toBe(2);
+  await transfer.dispose();
+  await invalid.dispose();
+});
+
+test("batch submission locks and cancellation works during the capacity check", async ({
+  page,
+}) => {
+  await fixture(page);
+  let checks = 0,
+    uploads = 0;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.goto("/dashboard/files");
+  await page
+    .getByRole("button", { name: "Upload file", exact: true })
+    .first()
+    .click();
+  await page.getByLabel("Choose files").setInputFiles(batchFiles(1));
+  await page.route(`${api}/subscriptions/current`, async (route) => {
+    checks++;
+    await gate;
+    await route
+      .fulfill({ json: { plan: plans[1], storedFiles: 2 } })
+      .catch(() => {});
+  });
+  await page.route(`${api}/files`, (route) => {
+    uploads++;
+    return route.fulfill({ status: 201, json: files[0] });
+  });
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("button", { name: "Upload file", exact: true })
+    .evaluate((button) => {
+      button.click();
+      button.click();
+    });
+  await expect(dialog).toContainText("Checking your available file slots");
+  await expect.poll(() => checks).toBe(1);
+  await dialog.getByRole("button", { name: "Stop uploads" }).click();
+  await expect(dialog).toContainText("Upload stopped");
+  await expect(
+    dialog.getByRole("status").filter({ hasText: /Ready/ }),
+  ).toHaveCount(1);
+  expect(uploads).toBe(0);
+  release();
 });

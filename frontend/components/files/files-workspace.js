@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { collection, request, upload } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { uniqueUploadFiles, isUploadUncertain } from "@/lib/upload-safety.mjs";
 import { useResource } from "@/lib/hooks";
 import { bytes, date, fileUsage, filterFiles } from "@/lib/utils";
 import {
@@ -400,7 +401,8 @@ function UploadDialog({ users, onClose, onUploaded }) {
     initialStored = useRef(fileUsage(subscription));
   useEffect(() => () => controller.current?.abort(), []);
   function choose(selected) {
-    const picked = Array.from(selected || []);
+    if (controller.current) return;
+    const picked = uniqueUploadFiles(files, selected);
     if (!picked.length) return;
     const invalid = picked.find(
       (file) => !/\.(csv|xlsx?)$/i.test(file.name) || !file.size,
@@ -427,7 +429,7 @@ function UploadDialog({ users, onClose, onUploaded }) {
     setError(null);
     setFiles((current) => [
       ...current,
-      ...picked.map((file) => ({
+      ...uniqueUploadFiles(current, picked).map((file) => ({
         id: ++nextId.current,
         file,
         status: "ready",
@@ -436,10 +438,13 @@ function UploadDialog({ users, onClose, onUploaded }) {
     ]);
   }
   async function send() {
+    if (controller.current) return;
     const candidates = files.filter(
       (item) => item.status === "ready" || item.status === "failed",
     );
     if (!candidates.length) return;
+    const activeController = new AbortController();
+    controller.current = activeController;
     setBusy(true);
     setError(null);
     setProgress(0);
@@ -450,7 +455,13 @@ function UploadDialog({ users, onClose, onUploaded }) {
       interrupted = false;
     try {
       // The workspace summary can be stale if another person just uploaded a file.
-      const current = await request("/subscriptions/current");
+      const current = await request("/subscriptions/current", {
+        signal: activeController.signal,
+      });
+      if (stopped.current) {
+        interrupted = true;
+        return;
+      }
       if (
         current.plan.extraFilePriceCents === null &&
         candidates.length >
@@ -469,8 +480,6 @@ function UploadDialog({ users, onClose, onUploaded }) {
           interrupted = true;
           break;
         }
-        const activeController = new AbortController();
-        controller.current = activeController;
         setActiveId(item.id);
         setActiveNumber(index + 1);
         setProgress(0);
@@ -494,10 +503,10 @@ function UploadDialog({ users, onClose, onUploaded }) {
             ),
           );
         } catch (uploadError) {
-          const uncertain =
-            stopped.current ||
-            activeController.signal.aborted ||
-            uploadError.status === 0;
+          const uncertain = isUploadUncertain(
+            uploadError,
+            activeController.signal,
+          );
           setFiles((currentFiles) =>
             currentFiles.map((entry) =>
               entry.id === item.id
@@ -517,13 +526,13 @@ function UploadDialog({ users, onClose, onUploaded }) {
           // Capacity, storage, or connection failures usually affect the rest too.
           if (uncertain || [401, 403, 429, 503].includes(uploadError.status))
             break;
-        } finally {
-          controller.current = null;
         }
       }
     } catch (e) {
-      setError(e);
+      if (stopped.current) interrupted = true;
+      else setError(e);
     } finally {
+      controller.current = null;
       if (succeeded || failed || interrupted) onUploaded();
       if (interrupted)
         setError(
@@ -537,7 +546,10 @@ function UploadDialog({ users, onClose, onUploaded }) {
             `${succeeded} ${succeeded === 1 ? "file was" : "files were"} uploaded; ${failed} ${failed === 1 ? "file needs" : "files need"} attention. Review the list below.`,
           ),
         );
-      else if (succeeded === candidates.length) {
+      else if (
+        succeeded === candidates.length &&
+        !files.some((item) => item.status === "uncertain")
+      ) {
         toast(
           succeeded === 1
             ? "File added to your vault"
@@ -627,10 +639,12 @@ function UploadDialog({ users, onClose, onUploaded }) {
                 />
                 <span className="upload-queue-details">
                   <strong>{item.file.name}</strong>
-                  <small>
+                  <small role="status">
                     {bytes(item.file.size)} ·{" "}
                     {item.status === "uploading"
-                      ? `Uploading ${progress}%`
+                      ? progress === 100
+                        ? "Transferred; waiting for the server…"
+                        : `Uploading ${progress}%`
                       : item.status === "success"
                         ? "Uploaded"
                         : item.status === "failed" ||
@@ -638,6 +652,13 @@ function UploadDialog({ users, onClose, onUploaded }) {
                           ? item.message
                           : "Ready"}
                   </small>
+                  {item.status === "uploading" && (
+                    <Progress
+                      value={progress}
+                      max={100}
+                      label={`Upload progress for ${item.file.name}`}
+                    />
+                  )}
                 </span>
                 {item.status === "success" ? (
                   <Check
@@ -646,7 +667,8 @@ function UploadDialog({ users, onClose, onUploaded }) {
                     aria-label="Uploaded"
                   />
                 ) : (
-                  !busy && (
+                  !busy &&
+                  item.status !== "uncertain" && (
                     <button
                       type="button"
                       className="icon-button"
@@ -688,14 +710,22 @@ function UploadDialog({ users, onClose, onUploaded }) {
       <p className="small muted">
         Visibility below applies to every file in this batch.
       </p>
-      <Permissions
-        value={permissions}
-        onChange={setPermissions}
-        users={users}
-        isAdmin={isAdmin}
-        user={user}
-        legend="Who can access these files?"
-      />
+      {files.some((item) => item.status === "uncertain") && (
+        <p className="small muted">
+          Close this dialog to review the refreshed vault. Unconfirmed files
+          cannot be retried or reselected here.
+        </p>
+      )}
+      <fieldset disabled={busy} className="upload-permissions">
+        <Permissions
+          value={permissions}
+          onChange={setPermissions}
+          users={users}
+          isAdmin={isAdmin}
+          user={user}
+          legend="Who can access these files?"
+        />
+      </fieldset>
       {busy && (
         <div role="status" aria-live="polite">
           <Progress value={progress} max={100} label="Upload progress" />

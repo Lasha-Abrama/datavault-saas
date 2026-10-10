@@ -1371,6 +1371,11 @@ tbody tr:hover {
   background: #e2efda;
   border-color: var(--teal);
 }
+.upload-permissions {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
 .detail-file {
   display: flex;
   gap: 14px;

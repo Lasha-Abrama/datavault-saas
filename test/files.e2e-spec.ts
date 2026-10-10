@@ -1247,6 +1247,30 @@ describe('company files (e2e)', () => {
     expect(objects.size).toBe(0);
   });
 
+  it('preserves successful batch items across validation and storage failures and permits a rejected-file retry', async () => {
+    await upload('first.csv', 'text/csv', Buffer.from('a,b')).expect(201);
+    await upload('invalid.csv', 'text/csv', Buffer.from([0])).expect(400);
+    failNextMetadataCreate = true;
+    await upload('failed.csv', 'text/csv', Buffer.from('a,b')).expect(500);
+    await upload('last.csv', 'text/csv', Buffer.from('a,b')).expect(201);
+    expect([...files.values()].map((file) => file.originalFilename)).toEqual([
+      'first.csv',
+      'last.csv',
+    ]);
+    expect(objects.size).toBe(2);
+    expect(periods.get(companyId.toString())?.uploadedFiles).toBe(2);
+    await upload('corrected.csv', 'text/csv', Buffer.from('a,b')).expect(201);
+    expect(files.size).toBe(3);
+    expect(objects.size).toBe(3);
+    await request(app.getHttpServer())
+      .get('/files')
+      .set(auth(otherOwnerToken))
+      .expect(200)
+      .expect(({ body }: { body: { total: number } }) =>
+        expect(body.total).toBe(0),
+      );
+  });
+
   it('paginates metadata and hides cross-tenant identifiers', async () => {
     const createdAt = new Date();
     for (let index = 0; index < 31; index++) {
