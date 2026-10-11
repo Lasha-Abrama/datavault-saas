@@ -72,6 +72,10 @@ export class CompanyFile {
   })
   restrictedUserIds: Types.ObjectId[];
 
+  // A publication transaction writes this fence to conflict with revocation/deletion.
+  @Prop({ type: Number, default: 0, select: false })
+  guardScanFence: number;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -117,6 +121,7 @@ companyFileSchema.pre('validate', function () {
 });
 companyFileSchema.set('toJSON', {
   transform: (_doc, ret) => {
+    delete (ret as unknown as Record<string, unknown>).guardScanFence;
     delete (ret as unknown as Record<string, unknown>).storageKey;
     return ret;
   },

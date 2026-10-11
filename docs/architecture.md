@@ -13,6 +13,7 @@ Reviewed against repository code on 2026-10-11. [Documentation index](README.md)
 - `src/subscriptions`: company subscription state, calendar billing periods, and centralized entitlement enforcement
 - `src/subscriptions/billing.service.ts`: authoritative current-period billing estimate from plan, employees, and upload accounting
 - `src/common`: current-user context plus extensible role metadata and guard
+- `src/sensitive-data-guard`: gated local XLSX scan jobs, deterministic detectors, isolated child processing and metadata-only findings (see [Phase 1 operations](sensitive-data-guard-phase1.md))
 - `src/files`: tenant-owned metadata, multipart validation, upload compensation, private downloads, and deletion policy
 - `src/aws-s3`: provider-neutral object-storage contract and private S3 adapter
 - `src/config`: startup validation and shared HTTP configuration

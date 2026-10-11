@@ -46,6 +46,10 @@ export class User {
   @Prop({ type: String })
   avatar?: string;
 
+  // A publication transaction writes this fence to conflict with revocation/deletion.
+  @Prop({ type: Number, default: 0, select: false })
+  guardScanFence: number;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,6 +60,7 @@ userSchema.index({ createdAt: -1, _id: -1 });
 userSchema.index({ role: 1, createdAt: -1, _id: -1 });
 userSchema.set('toJSON', {
   transform: (_doc, ret) => {
+    delete (ret as unknown as Record<string, unknown>).guardScanFence;
     delete ret.password;
     delete ret.passwordResetTokenHash;
     delete ret.passwordResetExpiresAt;

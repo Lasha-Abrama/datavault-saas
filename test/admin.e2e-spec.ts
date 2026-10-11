@@ -38,6 +38,12 @@ describe('platform-admin / tenant security boundary (e2e, mocked infrastructure)
     const builder = Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ConfigService)
       .useValue(f.config)
+      .overrideProvider(getModelToken('guardJob'))
+      .useValue({})
+      .overrideProvider(getModelToken('guardFinding'))
+      .useValue({})
+      .overrideProvider(getModelToken('guardEvent'))
+      .useValue({})
       .overrideProvider(getConnectionToken())
       .useValue({
         ...f.connection,

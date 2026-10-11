@@ -947,6 +947,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     'BillingQueryDto',
     'EmptyPaymentDto',
     'StatisticsQueryDto',
+    'GuardEmptyDto',
   ]);
   for (const path of Object.values(document.paths)) {
     if (!path) continue;

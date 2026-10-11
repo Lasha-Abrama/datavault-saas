@@ -62,6 +62,10 @@ export class Company {
   })
   platformStatusChangedBy?: Types.ObjectId;
 
+  // A publication transaction writes this fence to conflict with revocation/deletion.
+  @Prop({ type: Number, default: 0, select: false })
+  guardScanFence: number;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,6 +80,7 @@ companySchema.index({ activatedAt: 1, createdAt: -1, _id: -1 });
 companySchema.index({ createdAt: -1, _id: -1 });
 companySchema.set('toJSON', {
   transform: (_doc, ret) => {
+    delete (ret as unknown as Record<string, unknown>).guardScanFence;
     delete ret.platformStatusReason;
     delete ret.platformStatusChangedAt;
     delete ret.platformStatusChangedBy;

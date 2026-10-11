@@ -6,8 +6,9 @@ owner/member permissions, private CSV/XLS/XLSX storage, plan entitlements,
 internal billing estimates, platform administration, and an optional AI assistant.
 
 Stripe integration is **Test Mode only**. Google OAuth, S3, transactional email,
-and AI providers require their own configuration. Sensitive Data Guard is proposed
-work, not an implemented inspection/redaction feature.
+and AI providers require their own configuration. Sensitive Data Guard has a [scan-only backend](docs/sensitive-data-guard-phase1.md)
+behind a deployment safety gate; sanitization and frontend integration remain
+proposed work.
 
 ## Stack and layout
 

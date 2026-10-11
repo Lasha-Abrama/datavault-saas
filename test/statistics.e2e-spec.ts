@@ -156,6 +156,12 @@ describe('company statistics dashboard (e2e)', () => {
       left?.toString() === right?.toString();
 
     const fixture = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(getModelToken('guardJob'))
+      .useValue({})
+      .overrideProvider(getModelToken('guardFinding'))
+      .useValue({})
+      .overrideProvider(getModelToken('guardEvent'))
+      .useValue({})
       .overrideProvider(getConnectionToken())
       .useValue({
         close: jest.fn(),

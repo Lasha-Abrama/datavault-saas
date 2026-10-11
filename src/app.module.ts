@@ -15,6 +15,7 @@ import { HealthModule } from './health/health.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AdminModule } from './admin/admin.module';
 import { AiModule } from './ai/ai.module';
+import { SensitiveDataGuardModule } from './sensitive-data-guard/sensitive-data-guard.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AiModule } from './ai/ai.module';
     PaymentsModule,
     AdminModule,
     AiModule,
+    SensitiveDataGuardModule,
   ],
 })
 export class AppModule {}

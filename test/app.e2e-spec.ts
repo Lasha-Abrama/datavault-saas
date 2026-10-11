@@ -110,6 +110,12 @@ describe('multi-tenant HTTP boundary (e2e)', () => {
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     })
+      .overrideProvider(getModelToken('guardJob'))
+      .useValue({})
+      .overrideProvider(getModelToken('guardFinding'))
+      .useValue({})
+      .overrideProvider(getModelToken('guardEvent'))
+      .useValue({})
       .overrideProvider(getConnectionToken())
       .useValue({
         close: jest.fn(),

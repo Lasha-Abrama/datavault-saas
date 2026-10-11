@@ -8,7 +8,7 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { Connection, Model, Types } from 'mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { ObjectStorage } from '../aws-s3/object-storage';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { Role } from '../enums/roles.enum';
@@ -222,6 +222,23 @@ export class FilesService {
     );
     if (!updated) throw new NotFoundException('File not found');
     return this.publicMetadata(updated);
+  }
+
+  async processingSource(
+    actor: AuthenticatedUser,
+    fileId: string,
+    session?: ClientSession,
+  ) {
+    const query = { _id: fileId, ...this.accessFilter(actor) };
+    const file = session
+      ? await this.fileModel.findOneAndUpdate(
+          query,
+          { $inc: { guardScanFence: 1 } },
+          { new: true, session, timestamps: false },
+        )
+      : await this.fileModel.findOne(query);
+    if (!file) throw new NotFoundException('File not found');
+    return { fileType: file.fileType, size: file.size };
   }
 
   private async findStoredFile(

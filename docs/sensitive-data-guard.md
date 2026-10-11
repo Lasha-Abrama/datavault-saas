@@ -1,6 +1,7 @@
 # Sensitive Data Guard — architecture audit and implementation proposal
 
-**Status: proposal only; no feature implementation authorized or performed.**
+**Status: architecture proposal; later implementation phases require separate review.**
+The gated, scan-only Phase 1 backend is now documented in [the implementation guide](sensitive-data-guard-phase1.md). The audit and future-phase proposals below describe their original review baseline; they are not a claim that every proposed capability is implemented.
 Reviewed on 2026-10-11 against clean `main`, commit `847a8c1`. All new APIs,
 models, limits, modules and behaviors below are proposals requiring review.
 No dependencies, environment variables, secrets, source code or deployments are

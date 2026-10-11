@@ -12,6 +12,7 @@ import {
   AdminAuthController,
   AdminController,
 } from '../admin/admin.controller';
+import { GuardController } from '../sensitive-data-guard/guard.controller';
 import { AiController } from '../ai/ai.controller';
 import { AuthController } from '../auth/auth.controller';
 import { CompaniesController } from '../companies/companies.controller';
@@ -45,6 +46,7 @@ const controllers = [
   AdminController,
   HealthController,
   AiController,
+  GuardController,
 ];
 
 const httpMethods = new Set([
@@ -101,7 +103,7 @@ describe('OpenAPI document', () => {
       0,
     );
 
-    expect(operationCount).toBe(58);
+    expect(operationCount).toBe(63);
     expect(document.info).toMatchObject({
       title: 'DataVault SaaS API',
       version: '1.0',
@@ -118,6 +120,21 @@ describe('OpenAPI document', () => {
     }
   });
 
+  it('documents scan-only Guard contracts with tenant authorization and no values', () => {
+    const scan = requireOperation(
+      requirePath(document, '/files/{id}/guard/scans'),
+      'post',
+    );
+    expect(scan.security).toEqual([{ [TENANT_JWT]: [] }]);
+    expect(scan.responses['202']).toBeDefined();
+    expect(JSON.stringify(scan)).not.toContain('storageKey');
+    const findings = requireOperation(
+      requirePath(document, '/guard/scans/{id}/findings'),
+      'get',
+    );
+    expect(JSON.stringify(findings.responses)).not.toContain('preview');
+    expect(document.paths['/guard/scans/{id}/copies']).toBeUndefined();
+  });
   it('documents workspace recovery separately from platform admin recovery', () => {
     const forgot = requireOperation(
       requirePath(document, '/auth/forgot-password'),
