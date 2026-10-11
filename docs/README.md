@@ -31,3 +31,5 @@ contracts into several READMEs.
 contain dated integration context; deployment state must be checked separately.
 Earlier live checks are evidence about their recorded date, not current health.
 Sensitive Data Guard requires architecture/security review before implementation.
+
+[Sensitive Data Guard architecture proposal](sensitive-data-guard.md) audits the existing file lifecycle and specifies local XLSX detection, managed-copy security, API/schema proposals and phased acceptance gates. It is planning only and requires owner/design approval before implementation.
