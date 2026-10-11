@@ -5,7 +5,7 @@ See the [architecture proposal](sensitive-data-guard.md) for later phases.
 There is no sanitization, derived-file creation, transformed download, frontend
 integration, AI processing, or billing change in this phase.
 
-## Safety gate and deployment blocker
+## Safety gate and activation blocker
 
 **Admission and the automatic worker are disabled by default.** The Nest
 `GUARD_RUNTIME_POLICY` provider sets `isolationApproved: false`. A valid scan
@@ -38,8 +38,10 @@ file-access filter. Stored bytes are retrieved through existing private download
 service logic. Guard never calls storage put/delete or upload quota accounting.
 
 The actual database is **Mongoose/MongoDB**, not Prisma. No SQL/Prisma migration
-exists. Additive schemas create these collections through existing startup model
-initialization:
+exists. Guard schemas disable automatic collection/index creation, even though
+the shared connection enables indexes. Only an approved automatic worker
+explicitly creates its collections and indexes during bootstrap, before polling
+and before HTTP starts accepting requests:
 
 - `guardjobs`: company/requester/source references, UUID/request fingerprint,
   categories/optional phone region, engine version, status/real phase, attempt and
@@ -55,7 +57,8 @@ Indexes: unique `(companyId, requestedBy, requestKey)`; partial unique
 `(companyId, active)` where `active: true`; status/lease/creation queue index;
 requester/source/ID history; unique company/job/finding ordinal and event history.
 One active scan per tenant is deliberately more conservative than the proposed
-queue of ten. Existing Mongo transaction/index readiness checks apply.
+queue of ten. Existing Mongo transaction readiness checks still apply; existing
+application models retain their original startup index initialization.
 
 Company, User and CompanyFile receive an internal `guardScanFence` counter,
 excluded from selections/JSON. Existing records need no backfill: `$inc` creates
@@ -255,8 +258,9 @@ Guard tests, so live provider/deployment behavior is not verified.
 Before any separately authorized deployment:
 
 1. Review the additive schemas/indexes and shared fence fields. Confirm replica
-   set transactions, permissions to create indexes, startup index initialization
-   and database capacity. No destructive/backfill migration is required.
+   set transactions and existing-model startup index permissions/capacity. Guard
+   collection/index initialization is skipped while disabled. Before activation,
+   also verify Guard index permissions and capacity. No destructive/backfill migration is required.
 2. Build with Node 24 and install pinned dependencies; package the compiled child
    and dependencies. Benchmark limits and runtime overhead on the intended host.
 3. Establish and verify the isolation boundary above, then separately approve
@@ -290,3 +294,66 @@ Before any separately authorized deployment:
 No frontend tests/build, live S3, deployed sandbox, or production migration was
 run. A disposable real replica set verified model index initialization and
 transaction behavior; this does not establish production database capacity.
+
+## Disabled deployment safety review (2026-10-11)
+
+Reviewed implementation commit `60b43d4` and applied a targeted safety fix:
+Guard schemas set `autoCreate: false` and `autoIndex: false`. Previously, automatic
+index initialization could fail normal startup even with scan admission disabled.
+The approved worker now explicitly initializes its own collections/indexes before
+polling; an initialization failure aborts startup before accepting requests.
+The test-only enabled replica-set harness initializes these indexes explicitly.
+
+With the frozen default `isolationApproved: false`:
+
+- No Guard timer, recovery, claim, storage-content read, parser load or child runs
+  at bootstrap. Manual worker ticks also return immediately. Persisted queued or
+  processing jobs stay untouched; disabled mode does not recover stale leases.
+- Guard models remain registered for dependency injection, but startup creates
+  no Guard collections/indexes and does not backfill existing data. Existing
+  Mongo transaction-capability checks and other model indexes are unchanged.
+- Authenticated submissions validate source visibility/type/size metadata before
+  returning `503 guard_runtime_not_approved`. Ineligible inputs may return their
+  normal 400/404/413 errors. No job, fence write, workbook read or quota usage
+  results from a rejected admission. Normal JWT authorization still runs.
+- The gate is an admission/processing switch, not a global endpoint shutdown.
+  History/status/findings remain requester-only and require current source access;
+  cancellation can still change an existing job/fences/event in a transaction.
+  These paths disclose only their documented safe projections, never workbook
+  values, internal hashes, storage keys, lease tokens or arbitrary parser errors.
+  Fresh disabled deployments have no scan history. Disabling previously enabled
+  processing does not erase findings or stop a child already running; draining
+  active work would need a separately reviewed operational procedure.
+- No Guard environment variable or secret is required or read. There is no
+  environment toggle that approves the runtime. Do not change the safety provider
+  as part of a disabled deployment. Processing budgets schedule no work; source
+  metadata size validation remains active on submission.
+
+A compiled production API was started against a disposable localhost MongoDB
+replica set, using an isolated temporary working directory and an allowlisted
+placeholder environment (no repository `.env`, Guard variables or live providers).
+The smoke test verified readiness/liveness, absent Guard collections after startup,
+503 admission, unchanged queued data and `_id_`-only indexes after waiting beyond
+the polling interval, and unauthenticated status denial. Instrumentation rejected
+child creation, runner invocation and private-content downloads; the parser was
+not loaded. A separate regression verifies disabled historical-result scope and
+permission revocation. Normal initialization of existing collections still occurs
+in this isolated test, as it does before Guard.
+
+Render dashboard configuration, deployed database permissions/capacity, live
+provider behavior and container execution were not tested. Existing Node 24
+build/start commands and dependencies are sufficient for the disabled path.
+See [deployment guidance](deployment.md). Worker isolation and retention gates
+above block activation, rather than deployment of the disabled code.
+
+Safety-review validation: backend build passed on Node 24.21.0; full units passed
+60 suites / 731 tests; full HTTP passed 10 suites / 163 tests, including 16 Guard
+replica-set tests and the compiled production startup smoke. Exact repository
+lint, backend formatting, changed Markdown formatting, documentation validation
+(31 Markdown files / 225 local links / 18 script references / 68 template variables)
+and `git diff --check` passed. An initial sandbox HTTP attempt failed to bind
+localhost (`EPERM`); the approved local-socket rerun and final full suite passed.
+The first lint pass found formatting and a test index-result typing issue, both
+fixed before successful validation. CI still needs `mongod` to execute the real
+Guard suite; otherwise it is explicitly skipped. No dependency changed, and no
+live service or production infrastructure was contacted.

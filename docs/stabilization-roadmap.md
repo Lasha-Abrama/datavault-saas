@@ -376,3 +376,29 @@ The scanner inspects OOXML directly rather than adding ExcelJS for scan-only pro
 **Deployment remains blocked and admission/automatic processing are disabled by default.** Node 24 permissions do not enforce outbound network isolation or total native-memory limits. An approved, verified OS/container worker boundary and retention/cleanup policy are required before changing the runtime safety provider. Synthetic tests explicitly enable the provider; they do not prove deployment isolation or live S3 integration. No commit/push/deployment was performed.
 
 Verification: production backend build and formatting passed; backend unit suite passed 59 suites/728 tests, and final focused scan/Swagger tests (4 suites/50 tests). The final full HTTP suite passed 10 suites/161 tests, including 14 new Guard tests against a disposable real MongoDB replica set (private storage mocked). These verify actual additive indexes, transaction publication races, concurrent UUID admission, scope/cancellation/restart/deletion/suspension and privacy-safe findings. Earlier full HTTP run had upload socket/Stripe signature failures; both suites passed isolated reruns and the subsequent full run passed. Dependency audit reports zero vulnerabilities. Documentation links/formatting and whitespace checks passed. The exact repository npm lint script passed when run without the command wrapper. Wrapper lint attempts exhausted memory at both 2 and 4 GiB; the direct repository-scoped check also passed.
+
+## Guard disabled deployment safety review (2026-10-11)
+
+Reviewed `60b43d4` with a clean initial working tree. A targeted fix prevents
+Guard collection/index creation from interfering with ordinary startup while
+disabled; approved worker bootstrap initializes these explicitly before polling.
+Admission and automatic processing remain disabled, with no configuration,
+frontend, file-action, billing or secret changes. No commit/push/deployment occurred.
+
+The compiled production API passed a disposable local replica-set startup smoke
+with no Guard configuration: healthy probes, 503 admission, no automatic Guard
+collections/indexes, unchanged queued work and no child/parser/content reads.
+Disabled historical metadata remains scoped to the authorized requester and
+current file visibility; the gate does not remove history or disable cancellation.
+See [the safety review](sensitive-data-guard-phase1.md#disabled-deployment-safety-review-2026-10-11).
+The earlier deployment blocker refers to **activation**: worker isolation,
+retention and live operational checks remain unresolved. The Render dashboard and
+production infrastructure were not accessed.
+
+Final safety-review checks: backend build, lint, formatting and whitespace passed;
+units 60 suites/731 tests and HTTP 10 suites/163 tests passed, including 16 real
+Guard replica-set cases. Documentation validation passed 31 Markdown files and
+225 local links/anchors. Initial sandbox socket denial and test lint issues were
+resolved before the final successful runs. Ready for review and an authorized
+push with the default safety policy unchanged; this does not approve activation
+or establish live Render/provider health.

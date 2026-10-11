@@ -33,12 +33,21 @@ export class GuardWorker implements OnApplicationBootstrap, OnModuleDestroy {
     @Inject(GUARD_LIMITS) private readonly limits: GuardLimits,
     @Inject(GUARD_RUNTIME_POLICY) private readonly runtime: GuardRuntimePolicy,
   ) {}
-  onApplicationBootstrap() {
+  async onApplicationBootstrap() {
     if (
       !this.runtime.isolationApproved ||
       this.config.get<string>('NODE_ENV') === 'test'
     )
       return;
+    // Disabled Guard models must not create collections/indexes during normal startup.
+    for (const model of [
+      this.service.jobs,
+      this.service.findings,
+      this.service.events,
+    ]) {
+      await model.createCollection();
+      await model.createIndexes();
+    }
     this.timer = setInterval(() => {
       void this.tick();
     }, 2000);

@@ -10,6 +10,12 @@ the intended revision and environment before an explicitly authorized release.
 Use a Node Web Service with repository root as its root directory and Node 24.
 Set build command `npm ci && npm run build` and start command
 `npm run start:prod`. Keep development dependencies available during the build.
+Render's [Node version selection](https://render.com/docs/node-version) gives a
+Dashboard `NODE_VERSION` override precedence over `.node-version`, `.nvmrc` and
+package engines. The repository `.nvmrc` specifies 24, while package engines
+remain `>=22.13.0`; verify any dashboard override before release. No runtime
+configuration was changed during the disabled Guard review.
+
 Nest binds `0.0.0.0` and reads Render's `PORT`. Configure backend values privately
 from [the environment reference](environment.md); set `NODE_ENV=production`.
 Never bake an `.env` into a build or image. These commands follow Render's
@@ -34,6 +40,13 @@ billing. Use a suitable always-running deployment for operational billing.
 For Brevo, the existing sender supports port 2525 with STARTTLS; see [email
 configuration](environment.md#transactional-email) and [Brevo's port guidance](https://help.brevo.com/hc/en-us/articles/10905415650322-Which-SMTP-port-should-I-use-Port-587-465-or-2525).
 Delivery still needs sender/account approval and an authorized mailbox check.
+
+Sensitive Data Guard admission and polling remain disabled by the default Nest
+runtime-policy provider. No Guard environment configuration is needed. Disabled
+Guard models skip automatic collection/index creation; existing models retain
+normal startup checks. Local production startup was tested, not this Render
+service. Guard activation requires separately approved isolation and retention:
+see [the disabled deployment review](sensitive-data-guard-phase1.md#disabled-deployment-safety-review-2026-10-11).
 
 ## Next.js on Vercel
 

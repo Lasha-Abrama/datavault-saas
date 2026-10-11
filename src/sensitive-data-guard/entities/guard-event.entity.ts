@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, Types } from 'mongoose';
-@Schema({ strict: 'throw' })
+@Schema({ strict: 'throw', autoCreate: false, autoIndex: false })
 export class GuardEvent {
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   companyId: Types.ObjectId;

@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, Types } from 'mongoose';
 import { CATEGORIES, Category } from '../guard.constants';
-@Schema({ strict: 'throw' })
+@Schema({ strict: 'throw', autoCreate: false, autoIndex: false })
 export class GuardFinding {
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   companyId: Types.ObjectId;

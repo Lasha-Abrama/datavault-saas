@@ -10,7 +10,7 @@ import { JwtModule, JwtService } from '@nestjs/jwt';
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 import { Readable } from 'node:stream';
 import { Connection, Model, Types } from 'mongoose';
@@ -67,7 +67,10 @@ const available =
 (available ? describe : describe.skip)(
   'Guard real replica-set HTTP/lifecycle (requires mongod and build)',
   () => {
-    let app: INestApplication<App>, daemon: ChildProcess, directory: string;
+    let app: INestApplication<App>,
+      daemon: ChildProcess,
+      directory: string,
+      mongoPort: number;
     let jobs: Model<GuardJob>,
       findings: Model<GuardFinding>,
       files: Model<CompanyFile>,
@@ -102,6 +105,7 @@ const available =
           server.close(() => resolve(address.port));
         });
       });
+      mongoPort = port;
       directory = mkdtempSync(join(tmpdir(), 'datavault-guard-test-'));
       daemon = spawn(
         'mongod',
@@ -192,6 +196,11 @@ const available =
       await app.init();
       const connection = module.get<Connection>(getConnectionToken());
       await Promise.all(Object.values(connection.models).map((m) => m.init()));
+      for (const name of ['guardJob', 'guardFinding', 'guardEvent']) {
+        const model = module.get<Model<object>>(getModelToken(name));
+        await model.createCollection();
+        await model.createIndexes();
+      }
       jobs = module.get(getModelToken('guardJob'));
       findings = module.get(getModelToken('guardFinding'));
       files = module.get(getModelToken('companyFile'));
@@ -252,6 +261,148 @@ const available =
       }
       if (directory) rmSync(directory, { recursive: true, force: true });
     });
+    it('starts the compiled production API without Guard configuration or database initialization', async () => {
+      const port = await new Promise<number>((resolvePort, reject) => {
+        const server = createServer();
+        server.on('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+          const address = server.address() as { port: number };
+          server.close(() => resolvePort(address.port));
+        });
+      });
+      const uri = `mongodb://127.0.0.1:${mongoPort}/guard_disabled_smoke?replicaSet=guardtest`;
+      const client = new MongoClient(uri);
+      await client.connect();
+      const database = client.db();
+      const entry = resolve(__dirname, '../dist/main.js');
+      const guardDirectory = resolve(__dirname, '../dist/sensitive-data-guard');
+      // Fail the smoke test if startup attempts parsing, private content reads or child creation.
+      const script = `
+        require('node:child_process').spawn = () => { throw new Error('unexpected_child'); };
+        require(${JSON.stringify(join(guardDirectory, 'guard.runner.js'))}).GuardRunner.prototype.run = () => { throw new Error('unexpected_scan'); };
+        require(${JSON.stringify(resolve(__dirname, '../dist/files/files.service.js'))}).FilesService.prototype.download = () => { throw new Error('unexpected_content_read'); };
+        require(${JSON.stringify(entry)});
+        if (Object.keys(require.cache).some(p => /(?:scan-child|scan-workbook)\\.js$/.test(p))) throw new Error('unexpected_parser_load');
+      `;
+      const process = spawn(global.process.execPath, ['-e', script], {
+        // A temporary working directory prevents dotenv from reading the repository's .env.
+        cwd: directory,
+        env: {
+          NODE_ENV: 'production',
+          PORT: String(port),
+          MONGO_URI: uri,
+          JWT_SECRET: 'guard-test-only-secret-with-at-least-32-characters',
+          ACCOUNT_ACTIVATION_URL: 'http://localhost:3000/activate',
+          EMPLOYEE_INVITATION_URL: 'http://localhost:3000/employee-activate',
+          EMAIL_PROVIDER: 'smtp',
+          SMTP_HOST: 'localhost',
+          SMTP_FROM: 'test@example.invalid',
+          AWS_EC2_METADATA_DISABLED: 'true',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let output = '';
+      const collect = (chunk: Buffer) => {
+        output = (output + chunk.toString()).slice(-128 * 1024);
+      };
+      process.stdout?.on('data', collect);
+      process.stderr?.on('data', collect);
+      const origin = `http://127.0.0.1:${port}`;
+      try {
+        let ready = false;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          if (process.exitCode !== null)
+            throw new Error('Production startup exited');
+          try {
+            ready = (
+              await fetch(`${origin}/health/ready`, {
+                signal: AbortSignal.timeout(500),
+              })
+            ).ok;
+          } catch {
+            /* Local listener is not ready yet. */
+          }
+          if (ready) break;
+          await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+        }
+        expect(ready).toBe(true);
+        expect((await fetch(`${origin}/health/live`)).status).toBe(200);
+        const names = (await database.listCollections().toArray()).map(
+          (c) => c.name,
+        );
+        expect(names).not.toEqual(expect.arrayContaining(['guardjobs']));
+        expect(names).not.toEqual(expect.arrayContaining(['guardfindings']));
+        expect(names).not.toEqual(expect.arrayContaining(['guardevents']));
+        await database.collection('companies').insertOne({
+          _id: tenant,
+          activatedAt: new Date(),
+          platformStatus: 'active',
+        });
+        await database.collection('users').insertOne({
+          _id: member,
+          companyId: tenant,
+          role: 'company_member',
+          email: 'smoke@example.invalid',
+        });
+        await database.collection('companyfiles').insertOne({
+          _id: new Types.ObjectId(fileId),
+          companyId: tenant,
+          uploaderId: member,
+          visibility: 'company_wide',
+          fileType: 'xlsx',
+          size: bytes.length,
+        });
+        const response = await fetch(`${origin}/files/${fileId}/guard/scans`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            requestKey: '11111111-1111-4111-8111-111111111111',
+            categories: ['email'],
+          }),
+        });
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({
+          message: 'guard_runtime_not_approved',
+        });
+        expect(await database.collection('guardjobs').countDocuments()).toBe(0);
+        const sentinel = {
+          _id: new Types.ObjectId(),
+          status: 'queued',
+          active: true,
+          companyId: tenant,
+        };
+        await database.collection('guardjobs').insertOne(sentinel);
+        await new Promise((resolveWait) => setTimeout(resolveWait, 2300));
+        expect(
+          await database.collection('guardjobs').findOne({ _id: sentinel._id }),
+        ).toEqual(sentinel);
+        expect(
+          (await database.collection('guardjobs').listIndexes().toArray()).map(
+            (i: { name: string }) => i.name,
+          ),
+        ).toEqual(['_id_']);
+        expect(output).not.toMatch(
+          /unexpected_child|unexpected_scan|unexpected_content_read|unexpected_parser_load|Guard worker unavailable/,
+        );
+        expect(
+          (await fetch(`${origin}/guard/jobs/${sentinel._id.toString()}`))
+            .status,
+        ).toBe(401);
+      } finally {
+        if (process.exitCode === null) {
+          const exited = new Promise<void>((resolveExit) =>
+            process.once('exit', () => resolveExit()),
+          );
+          process.kill('SIGTERM');
+          await exited;
+        }
+        await client.close();
+      }
+    }, 30000);
+
     beforeEach(async () => {
       jest.restoreAllMocks();
       await jobs.deleteMany({});
@@ -350,6 +501,48 @@ const available =
           type: 'bearer',
         })
         .expect(401);
+    });
+    it('keeps historical findings private and scoped while admission and processing are disabled', async () => {
+      const id = await submit();
+      await worker.tick();
+      const runtime = app.get<GuardRuntimePolicy>(GUARD_RUNTIME_POLICY);
+      runtime.isolationApproved = false;
+      const run = jest.spyOn(runner, 'run');
+      const read = jest.spyOn(storage, 'getObject');
+      read.mockClear();
+      try {
+        await worker.tick();
+        await post().expect(503);
+        const response = await request(app.getHttpServer())
+          .get(`/guard/scans/${id}/findings`)
+          .auth(token, { type: 'bearer' })
+          .expect('Cache-Control', 'private, no-store')
+          .expect(200);
+        for (const value of CANARIES)
+          expect(JSON.stringify(response.body)).not.toContain(value);
+        for (const denied of [outsiderToken, ownerToken]) {
+          await request(app.getHttpServer())
+            .get(`/guard/scans/${id}/findings`)
+            .auth(denied, { type: 'bearer' })
+            .expect(404);
+          await request(app.getHttpServer())
+            .get(`/guard/jobs/${id}`)
+            .auth(denied, { type: 'bearer' })
+            .expect(404);
+        }
+        await files.updateOne(
+          { _id: fileId },
+          { $set: { visibility: 'restricted', restrictedUserIds: [] } },
+        );
+        await request(app.getHttpServer())
+          .get(`/guard/scans/${id}/findings`)
+          .auth(token, { type: 'bearer' })
+          .expect(404);
+        expect(run).not.toHaveBeenCalled();
+        expect(read).not.toHaveBeenCalled();
+      } finally {
+        runtime.isolationApproved = true;
+      }
     });
     it('rejects ineligible formats, oversized sources and unbounded queries', async () => {
       await files.collection.updateOne(

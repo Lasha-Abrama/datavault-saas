@@ -7,7 +7,12 @@ import {
   SAFE_ERRORS,
   STATES,
 } from '../guard.constants';
-@Schema({ timestamps: true, strict: 'throw' })
+@Schema({
+  timestamps: true,
+  strict: 'throw',
+  autoCreate: false,
+  autoIndex: false,
+})
 export class GuardJob {
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   companyId: Types.ObjectId;
