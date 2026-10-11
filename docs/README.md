@@ -18,6 +18,8 @@ Reviewed against repository code on 2026-10-11. Begin with the [project README](
 | Resolve setup failures                          | [Troubleshooting](troubleshooting.md)                            |
 | Check completed work and remaining release gaps | [Stabilization roadmap](stabilization-roadmap.md)                |
 
+[Licensing audit and legal drafts](legal/README.md) separates MIT source licensing from hosted-service terms, customer data, privacy and third-party obligations. Ownership and policy TODOs block publication.
+
 Configuration authority is `src/config/environment.ts`, feature code, and the
 placeholder-only environment templates. Package manifests define runnable
 scripts; controllers/DTOs and generated Swagger define the API contract.

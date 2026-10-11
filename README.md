@@ -142,9 +142,22 @@ also loads [CLAUDE.md](CLAUDE.md). Use established `fix:`, `feat:`, `docs:`, `ci
 or `chore:` commit subjects. Do not push, deploy, modify secrets, delete stashes,
 or run destructive maintenance without explicit permission.
 
-The package is private and `UNLICENSED`; this repository does not grant an
-open-source license. Distribution, Terms of Service and Privacy Policy still
-require owner/legal decisions.
+## Licensing and legal drafts
+
+The owner selected the [MIT License](LICENSE) for authorized original source by
+**Lasha Abramishvili, Viktoria Kazarovi, and Zviadi Svanadze**. MIT and attribution
+permission for all three is owner-confirmed, not independently verified. Both
+private package manifests identify that original source as MIT; dependencies
+retain their own licenses and customer data is not licensed under MIT.
+
+**Unresolved asset:** `frontend/app/icon.svg` is excluded from the original-source
+MIT claim. Its creator/license is unknown, and the owner confirms Viktoria did
+not create it. Resolve its rights or approve an original/licensed replacement
+before public release. See [the licensing audit](docs/legal/LICENSING_AUDIT.md).
+
+Hosted-service Terms, Privacy, Acceptable Use, Retention, provider review and
+attribution documents are [review drafts](docs/legal/README.md), not adopted
+policies. They do not create hosted access or consent requirements.
 
 ## Documentation
 
