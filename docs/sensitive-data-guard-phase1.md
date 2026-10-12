@@ -2,8 +2,10 @@
 
 Phase 1 implementation, reviewed against the working tree based on `24c3ff5`.
 See the [architecture proposal](sensitive-data-guard.md) for later phases.
-There is no sanitization, derived-file creation, transformed download, frontend
-integration, AI processing, or billing change in this phase.
+There is no sanitization or derived-file creation within Phase 1 itself. The separately
+implemented [gated Phase 2 foundation](sensitive-data-guard-phase2.md) adds those backend
+capabilities while keeping both runtime approvals disabled. Frontend integration and
+AI processing remain absent; existing billing policy is unchanged.
 
 ## Safety gate and activation blocker
 
@@ -357,3 +359,14 @@ The first lint pass found formatting and a test index-result typing issue, both
 fixed before successful validation. CI still needs `mongod` to execute the real
 Guard suite; otherwise it is explicitly skipped. No dependency changed, and no
 live service or production infrastructure was contacted.
+
+## Phase 2 compatibility update
+
+[Phase 2](sensitive-data-guard-phase2.md) extends the existing job model/routes with
+kind, copy selection, fixed private output identity and durable reconciliation.
+Legacy jobs default to `scan`; existing scan detector/worker behavior is preserved.
+`sanitizationApproved` is a separate default-false provider property and requires
+`isolationApproved` too. Scan-only approval cannot claim/recover copy jobs or perform
+copy cleanup. Guard collection/index auto-initialization remains disabled. New
+child output is bounded private workbook IPC only for approved sanitization, never
+an API preview. All Phase 1 isolation/activation blockers continue to apply.

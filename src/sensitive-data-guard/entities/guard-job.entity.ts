@@ -6,6 +6,7 @@ import {
   GuardState,
   SAFE_ERRORS,
   STATES,
+  RedactionColumn,
 } from '../guard.constants';
 @Schema({
   timestamps: true,
@@ -14,6 +15,31 @@ import {
   autoIndex: false,
 })
 export class GuardJob {
+  @Prop({ enum: ['scan', 'sanitize'], default: 'scan', immutable: true }) kind:
+    'scan' | 'sanitize';
+  @Prop({ type: MongoSchema.Types.ObjectId, immutable: true })
+  scanId?: Types.ObjectId;
+  @Prop({
+    type: [
+      {
+        sheetIndex: Number,
+        column: Number,
+        includeHeader: Boolean,
+        _id: false,
+      },
+    ],
+    default: [],
+    immutable: true,
+  })
+  columns: RedactionColumn[];
+  @Prop({ type: MongoSchema.Types.ObjectId, immutable: true })
+  resultFileId?: Types.ObjectId;
+  @Prop({ select: false, immutable: true }) outputStorageKey?: string;
+  @Prop({ select: false }) outputDigest?: string;
+  @Prop({ default: false, select: false }) cleanupPending: boolean;
+  @Prop({ select: false }) cleanupAfter?: Date;
+  @Prop({ default: 0 }) redactedCells: number;
+
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   companyId: Types.ObjectId;
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
@@ -32,6 +58,8 @@ export class GuardJob {
       'queued',
       'fetching',
       'scanning',
+      'transforming',
+      'publishing',
       'completed',
       'failed',
       'cancelled',
@@ -72,3 +100,5 @@ guardJobSchema.index({
   sourceFileId: 1,
   _id: -1,
 });
+
+guardJobSchema.index({ kind: 1, active: 1, cleanupAfter: 1, _id: 1 });

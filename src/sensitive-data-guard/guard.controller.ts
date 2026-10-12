@@ -8,6 +8,8 @@ import {
   Post,
   Query,
   UseGuards,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -19,6 +21,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../common/types/authenticated-user';
 import { IsAuthGuard } from '../guards/is-auth.guard';
 import { IsValidMongoDBId } from '../users/dto/is-valid-objectID.dto';
+import { GuardSanitizationService } from './guard-sanitization.service';
+import { GuardRedactDto } from './dto/guard-redact.dto';
 import { GuardService } from './guard.service';
 import { jobSchema, findingsSchema } from './guard.openapi';
 import { GuardScanDto } from './dto/guard-scan.dto';
@@ -32,7 +36,10 @@ import {
 @ApiTags('Sensitive Data Guard')
 @ApiBearerAuth('tenant-jwt')
 export class GuardController {
-  constructor(private readonly service: GuardService) {}
+  constructor(
+    private readonly service: GuardService,
+    @Optional() private readonly sanitization?: GuardSanitizationService,
+  ) {}
   @Post('files/:id/guard/scans')
   @HttpCode(202)
   @Header('Cache-Control', 'private, no-store')
@@ -111,5 +118,59 @@ export class GuardController {
     void _body;
     void _query;
     return this.service.cancel(actor, id);
+  }
+  @Post('guard/scans/:id/copies')
+  @HttpCode(202)
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary:
+      'Enqueue a separate full-cell-redacted XLSX copy (disabled by default)',
+  })
+  @ApiResponse({ status: 202, schema: jobSchema })
+  redact(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param() { id }: IsValidMongoDBId,
+    @Body() dto: GuardRedactDto,
+    @Query() _query: GuardEmptyDto,
+  ) {
+    void _query;
+    if (!this.sanitization)
+      throw new ServiceUnavailableException('guard_runtime_not_approved');
+    return this.sanitization.submit(actor, id, dto);
+  }
+  @Get('files/:id/guard/copies')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'List your currently authorized, published derived copies',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      type: 'object',
+      properties: {
+        copies: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              jobId: { type: 'string' },
+              fileId: { type: 'string' },
+              strategyVersion: { type: 'string' },
+              createdAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
+        nextCursor: { type: 'string', nullable: true },
+      },
+    },
+  })
+  copies(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param() { id }: IsValidMongoDBId,
+    @Query() query: GuardJobsQueryDto,
+  ) {
+    if (!this.sanitization)
+      throw new ServiceUnavailableException('guard_runtime_not_approved');
+    return this.sanitization.history(actor, id, query);
   }
 }

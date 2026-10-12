@@ -5,11 +5,13 @@ import {
   OnApplicationBootstrap,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID, createHash } from 'node:crypto';
 import { FilesService } from '../files/files.service';
 import { GuardService, JobDocument } from './guard.service';
+import { GuardSanitizationService } from './guard-sanitization.service';
 import { GuardRunner } from './guard.runner';
 import {
   GUARD_LIMITS,
@@ -32,6 +34,7 @@ export class GuardWorker implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly config: ConfigService,
     @Inject(GUARD_LIMITS) private readonly limits: GuardLimits,
     @Inject(GUARD_RUNTIME_POLICY) private readonly runtime: GuardRuntimePolicy,
+    @Optional() private readonly sanitization?: GuardSanitizationService,
   ) {}
   async onApplicationBootstrap() {
     if (
@@ -72,21 +75,30 @@ export class GuardWorker implements OnApplicationBootstrap, OnModuleDestroy {
   }
   private async run() {
     await this.recover();
+    await this.sanitization?.cleanup();
     const token = randomUUID();
-    const job = await this.service.jobs.findOneAndUpdate(
-      { status: 'queued', active: true },
-      {
-        $set: {
-          status: 'processing',
-          phase: 'fetching',
-          leaseToken: token,
-          leaseExpiresAt: new Date(Date.now() + this.limits.leaseMs),
-          startedAt: new Date(),
+    const job = await this.service.jobs
+      .findOneAndUpdate(
+        {
+          status: 'queued',
+          active: true,
+          ...(this.runtime.sanitizationApproved
+            ? {}
+            : { kind: { $ne: 'sanitize' } }),
         },
-        $inc: { attempts: 1 },
-      },
-      { new: true, sort: { createdAt: 1 } },
-    );
+        {
+          $set: {
+            status: 'processing',
+            phase: 'fetching',
+            leaseToken: token,
+            leaseExpiresAt: new Date(Date.now() + this.limits.leaseMs),
+            startedAt: new Date(),
+          },
+          $inc: { attempts: 1 },
+        },
+        { new: true, sort: { createdAt: 1 } },
+      )
+      .select('+outputStorageKey +outputDigest');
     if (!job) return;
     const controller = new AbortController();
     this.abort = controller;
@@ -118,6 +130,15 @@ export class GuardWorker implements OnApplicationBootstrap, OnModuleDestroy {
       );
       if (!(await this.check(job, token)))
         throw new ScanError('guard_access_revoked');
+      if (job.kind === 'sanitize') {
+        if (!this.sanitization || !this.runtime.sanitizationApproved)
+          throw new ScanError('guard_worker_unavailable');
+        await this.service.jobs.updateOne(this.claim(job, token), {
+          $set: { phase: 'transforming' },
+        });
+        await this.sanitization.process(job, token, bytes, controller.signal);
+        return;
+      }
       await this.service.jobs.updateOne(this.claim(job, token), {
         $set: { phase: 'scanning' },
       });
@@ -342,6 +363,9 @@ export class GuardWorker implements OnApplicationBootstrap, OnModuleDestroy {
       .find({
         status: 'processing',
         active: true,
+        ...(this.runtime.sanitizationApproved
+          ? {}
+          : { kind: { $ne: 'sanitize' } }),
         leaseExpiresAt: { $lte: new Date() },
       })
       .select('+leaseToken')

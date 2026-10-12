@@ -35,3 +35,7 @@ Sensitive Data Guard requires architecture/security review before implementation
 [Sensitive Data Guard architecture proposal](sensitive-data-guard.md) audits the existing file lifecycle and specifies local XLSX detection, managed-copy security, API/schema proposals and phased acceptance gates. It is planning only and requires owner/design approval before implementation.
 
 [Guard Phase 1 implementation and operations](sensitive-data-guard-phase1.md) documents the scan-only backend, safety gate, API, database/index additions, limits and release blockers.
+
+[Guard Phase 2 sanitization foundation](sensitive-data-guard-phase2.md) documents the
+strict plain-cell profile, default-off gates, selected-cell guarantees, derived-file
+permissions/quota publication and durable storage reconciliation limitations.

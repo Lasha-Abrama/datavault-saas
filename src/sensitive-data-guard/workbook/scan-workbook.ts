@@ -24,7 +24,7 @@ function integer(value: string | undefined, min: number, max: number) {
     throw new ScanError('guard_limit_exceeded');
   return number;
 }
-function xml(
+export function xml(
   buffer: Buffer,
   limits: GuardLimits,
   open: (tag: SaxesTagNS) => void,

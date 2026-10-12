@@ -4,6 +4,7 @@ export interface PutObjectInput {
   key: string;
   body: Buffer;
   contentType: string;
+  signal?: AbortSignal;
 }
 
 export interface StoredObject {

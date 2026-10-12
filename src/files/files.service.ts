@@ -20,7 +20,9 @@ import { User } from '../users/entities/user.entity';
 import {
   CompanyFile,
   CompanyFileVisibility,
+  CompanyFileType,
 } from './entities/company-file.entity';
+import { SANITIZATION_VERSION } from '../sensitive-data-guard/guard.constants';
 import { UploadedCompanyFile, validateCompanyFile } from './file-validation';
 import {
   UpdateFilePermissionsDto,
@@ -151,7 +153,19 @@ export class FilesService {
       this.fileModel.countDocuments(filter),
     ]);
     return {
-      files: files.map((file) => this.publicMetadata(file)),
+      files: (
+        await Promise.all(
+          files.map(async (file) => {
+            try {
+              await this.assertLineage(actor, file);
+              return this.publicMetadata(file);
+            } catch (error) {
+              if (error instanceof NotFoundException) return null;
+              throw error;
+            }
+          }),
+        )
+      ).filter((file) => file !== null),
       total,
       page,
       take,
@@ -164,6 +178,7 @@ export class FilesService {
       ...this.accessFilter(actor),
     });
     if (!file) throw new NotFoundException('File not found');
+    await this.assertLineage(actor, file);
     return this.publicMetadata(file);
   }
 
@@ -174,7 +189,7 @@ export class FilesService {
   }
 
   async delete(actor: AuthenticatedUser, fileId: string) {
-    const file = await this.findStoredFile(actor, fileId);
+    const file = await this.findStoredFile(actor, fileId, false);
     if (
       actor.role !== Role.COMPANY_OWNER &&
       file.uploaderId.toString() !== actor.id
@@ -183,6 +198,19 @@ export class FilesService {
         'Only the uploader or company owner can delete this file',
       );
 
+    if (file.derivation) {
+      if (!this.connection.db) throw new Error('Database unavailable');
+      // Keep a durable tombstone before deletion; late storage acknowledgements need reconciliation.
+      await this.connection.db.collection('guardjobs').updateOne(
+        {
+          _id: file.derivation.jobId,
+          companyId: file.companyId,
+          resultFileId: file._id,
+        },
+        { $set: { cleanupPending: true, cleanupAfter: new Date() } },
+        { writeConcern: { w: 'majority' } },
+      );
+    }
     await this.storage.deleteObject(file.storageKey);
     const deleted = await this.fileModel.findOneAndDelete({
       _id: fileId,
@@ -209,6 +237,10 @@ export class FilesService {
     )
       throw new ForbiddenException(
         'Only the uploader or company owner can change file permissions',
+      );
+    if (file.derivation)
+      throw new ForbiddenException(
+        'Derived-file sharing requires separate policy approval',
       );
     const permissions = await this.validatePermissions(
       actor,
@@ -238,23 +270,117 @@ export class FilesService {
         )
       : await this.fileModel.findOne(query);
     if (!file) throw new NotFoundException('File not found');
-    return { fileType: file.fileType, size: file.size };
+    await this.assertLineage(actor, file, session);
+    return {
+      fileType: file.fileType,
+      size: file.size,
+      derived: Boolean(file.derivation),
+    };
+  }
+
+  private async assertLineage(
+    actor: AuthenticatedUser,
+    file: { derivation?: { sourceFileId: Types.ObjectId } },
+    session?: ClientSession,
+  ) {
+    if (!file.derivation) return;
+    const filter = {
+      _id: file.derivation.sourceFileId,
+      ...this.accessFilter(actor),
+      derivation: { $exists: false },
+    };
+    const source = session
+      ? await this.fileModel.findOneAndUpdate(
+          filter,
+          { $inc: { guardScanFence: 1 } },
+          { session, new: true, timestamps: false },
+        )
+      : await this.fileModel.findOne(filter);
+    if (!source) throw new NotFoundException('File not found');
+  }
+
+  async guardCopyExists(companyId: string, fileId: string) {
+    return this.fileModel.findOne({ _id: fileId, companyId }, null, {
+      readPreference: 'primary',
+      readConcern: { level: 'majority' },
+    });
+  }
+  async publishGuardCopy(
+    actor: AuthenticatedUser,
+    sourceFileId: string,
+    output: { fileId: string; jobId: string; storageKey: string; size: number },
+    session: ClientSession,
+  ) {
+    const source = await this.fileModel
+      .findOne({
+        _id: sourceFileId,
+        ...this.accessFilter(actor),
+        derivation: { $exists: false },
+      })
+      .session(session);
+    if (!source) throw new NotFoundException('File not found');
+    if (output.size > this.config.getOrThrow<number>('FILE_MAX_SIZE_BYTES'))
+      throw new BadRequestException('guard_limit_exceeded');
+    await this.entitlements.recordFileUploads(
+      actor.companyId,
+      1,
+      new Date(),
+      session,
+    );
+    const [created] = await this.fileModel.create(
+      [
+        {
+          _id: output.fileId,
+          companyId: actor.companyId,
+          uploaderId: actor.id,
+          originalFilename: `sanitized-${output.jobId}.xlsx`,
+          storageKey: output.storageKey,
+          fileType: CompanyFileType.XLSX,
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          size: output.size,
+          // Narrow copies to their requester; source authorization is also mandatory on reads.
+          visibility: CompanyFileVisibility.RESTRICTED,
+          restrictedUserIds: [actor.id],
+          derivation: {
+            sourceFileId,
+            jobId: output.jobId,
+            strategyVersion: SANITIZATION_VERSION,
+            createdAt: new Date(),
+          },
+        },
+      ],
+      { session },
+    );
+    return created._id.toString();
   }
 
   private async findStoredFile(
     actor: AuthenticatedUser,
     fileId: IsValidMongoDBId['id'],
+    lineage = true,
   ) {
     const file = await this.fileModel
       .findOne({ _id: fileId, ...this.accessFilter(actor) })
       .select('+storageKey');
     if (!file) throw new NotFoundException('File not found');
+    if (lineage) await this.assertLineage(actor, file);
     return file;
   }
 
   private publicMetadata(file: CompanyFile & { _id?: unknown }) {
     return {
       id: file._id,
+      ...(file.derivation
+        ? {
+            derivation: {
+              sourceFileId: file.derivation.sourceFileId,
+              jobId: file.derivation.jobId,
+              strategyVersion: file.derivation.strategyVersion,
+              createdAt: file.derivation.createdAt,
+            },
+          }
+        : {}),
       uploaderId: file.uploaderId,
       originalFilename: file.originalFilename,
       fileType: file.fileType,

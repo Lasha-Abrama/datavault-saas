@@ -43,14 +43,15 @@ export class AwsS3Service implements ObjectStorage {
   async putObject(input: PutObjectInput): Promise<void> {
     this.requireStorage();
     try {
-      await this.storageService.send(
-        new PutObjectCommand({
-          Key: input.key,
-          Bucket: this.bucketName,
-          Body: input.body,
-          ContentType: input.contentType,
-        }),
-      );
+      const command = new PutObjectCommand({
+        Key: input.key,
+        Bucket: this.bucketName,
+        Body: input.body,
+        ContentType: input.contentType,
+      });
+      if (input.signal)
+        await this.storageService.send(command, { abortSignal: input.signal });
+      else await this.storageService.send(command);
     } catch {
       this.logger.error('S3 upload failed');
       throw new ServiceUnavailableException('Could not upload file');

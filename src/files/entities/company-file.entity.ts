@@ -12,8 +12,28 @@ export enum CompanyFileVisibility {
   RESTRICTED = 'restricted',
 }
 
+@Schema({ _id: false })
+export class FileDerivation {
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    required: true,
+    immutable: true,
+  })
+  sourceFileId: Types.ObjectId;
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    required: true,
+    immutable: true,
+  })
+  jobId: Types.ObjectId;
+  @Prop({ required: true, immutable: true }) strategyVersion: string;
+  @Prop({ required: true, immutable: true }) createdAt: Date;
+}
+const derivationSchema = SchemaFactory.createForClass(FileDerivation);
 @Schema({ timestamps: true })
 export class CompanyFile {
+  @Prop({ type: derivationSchema, immutable: true })
+  derivation?: FileDerivation;
   @Prop({
     type: MongooseSchema.Types.ObjectId,
     ref: 'company',

@@ -103,7 +103,7 @@ describe('OpenAPI document', () => {
       0,
     );
 
-    expect(operationCount).toBe(63);
+    expect(operationCount).toBe(65);
     expect(document.info).toMatchObject({
       title: 'DataVault SaaS API',
       version: '1.0',
@@ -120,7 +120,7 @@ describe('OpenAPI document', () => {
     }
   });
 
-  it('documents scan-only Guard contracts with tenant authorization and no values', () => {
+  it('documents gated Guard scan and sanitization contracts with tenant authorization and no values', () => {
     const scan = requireOperation(
       requirePath(document, '/files/{id}/guard/scans'),
       'post',
@@ -133,7 +133,15 @@ describe('OpenAPI document', () => {
       'get',
     );
     expect(JSON.stringify(findings.responses)).not.toContain('preview');
-    expect(document.paths['/guard/scans/{id}/copies']).toBeUndefined();
+    const copies = requireOperation(
+      requirePath(document, '/guard/scans/{id}/copies'),
+      'post',
+    );
+    expect(copies.security).toEqual([{ [TENANT_JWT]: [] }]);
+    expect(copies.responses['202']).toBeDefined();
+    expect(JSON.stringify(copies.responses)).not.toMatch(
+      /outputStorageKey|outputDigest|preview/,
+    );
   });
   it('documents workspace recovery separately from platform admin recovery', () => {
     const forgot = requireOperation(

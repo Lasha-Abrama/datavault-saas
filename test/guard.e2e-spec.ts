@@ -1,4 +1,4 @@
-import { INestApplication, Logger } from '@nestjs/common';
+import { INestApplication, Logger, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import {
@@ -25,6 +25,8 @@ import {
   companyFileSchema,
   CompanyFile,
 } from '../src/files/entities/company-file.entity';
+import { FilesController } from '../src/files/files.controller';
+import { GuardSanitizationService } from '../src/sensitive-data-guard/guard-sanitization.service';
 import { FilesService } from '../src/files/files.service';
 import { ObjectStorage } from '../src/aws-s3/object-storage';
 import { EntitlementsService } from '../src/subscriptions/entitlements.service';
@@ -50,7 +52,7 @@ import {
   GuardRuntimePolicy,
   DEFAULT_RUNTIME_POLICY,
 } from '../src/sensitive-data-guard/guard.constants';
-import { workbook, CANARIES } from './fixtures/guard/workbook';
+import { workbook, plainWorkbook, CANARIES } from './fixtures/guard/workbook';
 
 // This suite uses a disposable localhost replica set, never a configured Mongo URI.
 const body = (response: request.Response) =>
@@ -58,6 +60,11 @@ const body = (response: request.Response) =>
     jobId: string;
     requestKey: string;
     status: string;
+    kind: string;
+    resultFileId: string;
+    redactedCells: number;
+    errorCode?: string;
+    copies: { fileId: string }[];
     jobs: unknown[];
     findings: { ordinal: number }[];
     nextCursor: number | null;
@@ -86,15 +93,24 @@ const available =
       outsiderToken: string;
     let runner: GuardRunner;
     const bytes = workbook();
+    const objects = new Map<string, Buffer>();
+    let quotaLimit = 100;
+    const entitlements = { recordFileUploads: jest.fn() };
     const storage = {
-      getObject: jest.fn(() =>
+      getObject: jest.fn((key: string) =>
         Promise.resolve({
-          stream: Readable.from(bytes),
-          contentLength: bytes.length,
+          stream: Readable.from(objects.get(key) ?? bytes),
+          contentLength: (objects.get(key) ?? bytes).length,
         }),
       ),
-      putObject: jest.fn(),
-      deleteObject: jest.fn(),
+      putObject: jest.fn((input: { key: string; body: Buffer }) => {
+        objects.set(input.key, Buffer.from(input.body));
+        return Promise.resolve();
+      }),
+      deleteObject: jest.fn((key: string) => {
+        objects.delete(key);
+        return Promise.resolve();
+      }),
     };
     beforeAll(async () => {
       const port = await new Promise<number>((resolve, reject) => {
@@ -166,16 +182,17 @@ const available =
             secret: 'guard-test-only-secret-with-at-least-32-characters',
           }),
         ],
-        controllers: [GuardController],
+        controllers: [GuardController, FilesController],
         providers: [
           IsAuthGuard,
           FilesService,
           GuardService,
+          GuardSanitizationService,
           GuardAccessService,
           GuardRunner,
           GuardWorker,
           { provide: ObjectStorage, useValue: storage },
-          { provide: EntitlementsService, useValue: {} },
+          { provide: EntitlementsService, useValue: entitlements },
           {
             provide: ConfigService,
             useValue: new ConfigService({
@@ -204,6 +221,27 @@ const available =
       jobs = module.get(getModelToken('guardJob'));
       findings = module.get(getModelToken('guardFinding'));
       files = module.get(getModelToken('companyFile'));
+      entitlements.recordFileUploads.mockImplementation(
+        async (
+          companyId: string,
+          quantity: number,
+          _at: Date,
+          session: import('mongoose').ClientSession,
+        ) => {
+          if (
+            (await files.countDocuments({ companyId }).session(session)) >=
+            quotaLimit
+          )
+            throw new ForbiddenException('synthetic quota denial');
+          await module
+            .get<Model<object>>(getModelToken('company'))
+            .collection.updateOne(
+              { _id: new Types.ObjectId(companyId) },
+              { $inc: { syntheticUploads: quantity } },
+              { session },
+            );
+        },
+      );
       worker = module.get(GuardWorker);
       runner = module.get(GuardRunner);
       await module
@@ -280,6 +318,7 @@ const available =
       const script = `
         require('node:child_process').spawn = () => { throw new Error('unexpected_child'); };
         require(${JSON.stringify(join(guardDirectory, 'guard.runner.js'))}).GuardRunner.prototype.run = () => { throw new Error('unexpected_scan'); };
+        require(${JSON.stringify(join(guardDirectory, 'guard.runner.js'))}).GuardRunner.prototype.sanitize = () => { throw new Error('unexpected_sanitize'); };
         require(${JSON.stringify(resolve(__dirname, '../dist/files/files.service.js'))}).FilesService.prototype.download = () => { throw new Error('unexpected_content_read'); };
         require(${JSON.stringify(entry)});
         if (Object.keys(require.cache).some(p => /(?:scan-child|scan-workbook)\\.js$/.test(p))) throw new Error('unexpected_parser_load');
@@ -373,8 +412,26 @@ const available =
           status: 'queued',
           active: true,
           companyId: tenant,
+          requestedBy: member,
+          sourceFileId: new Types.ObjectId(fileId),
         };
         await database.collection('guardjobs').insertOne(sentinel);
+        const disabledCopy = await fetch(
+          `${origin}/guard/scans/${sentinel._id.toString()}/copies`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              requestKey: '22222222-2222-4222-8222-222222222222',
+              categories: ['email'],
+            }),
+          },
+        );
+        expect(disabledCopy.status).toBe(503);
+        expect(await database.collection('guardjobs').countDocuments()).toBe(1);
         await new Promise((resolveWait) => setTimeout(resolveWait, 2300));
         expect(
           await database.collection('guardjobs').findOne({ _id: sentinel._id }),
@@ -385,7 +442,7 @@ const available =
           ),
         ).toEqual(['_id_']);
         expect(output).not.toMatch(
-          /unexpected_child|unexpected_scan|unexpected_content_read|unexpected_parser_load|Guard worker unavailable/,
+          /unexpected_child|unexpected_scan|unexpected_sanitize|unexpected_content_read|unexpected_parser_load|Guard worker unavailable/,
         );
         expect(
           (await fetch(`${origin}/guard/jobs/${sentinel._id.toString()}`))
@@ -405,6 +462,19 @@ const available =
 
     beforeEach(async () => {
       jest.restoreAllMocks();
+      storage.putObject.mockClear();
+      storage.deleteObject.mockClear();
+      entitlements.recordFileUploads.mockClear();
+      objects.clear();
+      quotaLimit = 100;
+      app.get<GuardRuntimePolicy>(GUARD_RUNTIME_POLICY).sanitizationApproved =
+        false;
+      await app
+        .get<Model<object>>(getModelToken('company'))
+        .collection.updateOne(
+          { _id: tenant },
+          { $set: { syntheticUploads: 0 } },
+        );
       await jobs.deleteMany({});
       await findings.deleteMany({});
       await files.deleteMany({});
@@ -778,6 +848,459 @@ const available =
             index.unique && index.partialFilterExpression?.active === true,
         ),
       ).toBe(true);
+    });
+
+    describe('sanitization publication and lifecycle', () => {
+      let scanId: string, sourceKey: string;
+      beforeEach(async () => {
+        const file = (await files.findById(fileId).select('+storageKey'))!;
+        sourceKey = file.storageKey;
+        const original = plainWorkbook();
+        objects.set(sourceKey, original);
+        await files.collection.updateOne(
+          { _id: new Types.ObjectId(fileId) },
+          { $set: { size: original.length } },
+        );
+        scanId = await submit();
+        await worker.tick();
+        expect((await jobs.findById(scanId))?.status).toBe('completed');
+        app.get<GuardRuntimePolicy>(GUARD_RUNTIME_POLICY).sanitizationApproved =
+          true;
+      });
+      const redact = (
+        id: string,
+        key = crypto.randomUUID(),
+        auth = token,
+        extra: Record<string, unknown> = {},
+      ) =>
+        request(app.getHttpServer())
+          .post(`/guard/scans/${id}/copies`)
+          .auth(auth, { type: 'bearer' })
+          .send({ requestKey: key, categories: [...CATEGORIES], ...extra });
+      const runCopy = async () => {
+        const submitted = await redact(scanId).expect(202);
+        const id = body(submitted).jobId;
+        await worker.tick();
+        const result = await request(app.getHttpServer())
+          .get(`/guard/jobs/${id}`)
+          .auth(token, { type: 'bearer' })
+          .expect(200);
+        return { id, response: result, fileId: body(result).resultFileId };
+      };
+      it('publishes one separate private copy, charges once and supports download/history/deletion', async () => {
+        const before = await files.findById(fileId).lean(),
+          original = Buffer.from(objects.get(sourceKey)!);
+        const key = crypto.randomUUID();
+        const submitted = await redact(scanId, key, token, {
+          columns: [{ sheetIndex: 0, column: 4, includeHeader: true }],
+        }).expect(202);
+        const id = body(submitted).jobId;
+        await worker.tick();
+        const result = await request(app.getHttpServer())
+          .get(`/guard/jobs/${id}`)
+          .auth(token, { type: 'bearer' })
+          .expect(200);
+        expect(body(result)).toMatchObject({
+          status: 'completed',
+          kind: 'sanitize',
+          redactedCells: 7,
+        });
+        const outputId = body(result).resultFileId;
+        expect(outputId).not.toBe(fileId);
+        expect(await files.findById(fileId).lean()).toEqual(before);
+        expect(objects.get(sourceKey)?.equals(original)).toBe(true);
+        const output = (await files.findById(outputId).select('+storageKey'))!;
+        expect(output.derivation?.sourceFileId.toString()).toBe(fileId);
+        expect(output.storageKey).not.toBe(sourceKey);
+        expect(output.visibility).toBe('restricted');
+        const downloaded = await request(app.getHttpServer())
+          .get(`/files/${outputId}/download`)
+          .auth(token, { type: 'bearer' })
+          .buffer(true)
+          .parse((response, done) => {
+            const chunks: Buffer[] = [];
+            response.on('data', (chunk: Buffer) => chunks.push(chunk));
+            response.on('end', () => done(null, Buffer.concat(chunks)));
+            response.on('error', (error: Error) => done(error, undefined));
+          })
+          .expect(200);
+        expect(
+          (downloaded.body as Buffer).equals(objects.get(output.storageKey)!),
+        ).toBe(true);
+        for (const raw of CANARIES)
+          expect(objects.get(output.storageKey)!.toString()).not.toContain(raw);
+        const history = await request(app.getHttpServer())
+          .get(`/files/${fileId}/guard/copies`)
+          .auth(token, { type: 'bearer' })
+          .expect(200);
+        expect(body(history).copies.map((c) => c.fileId)).toEqual([outputId]);
+        expect(JSON.stringify([body(result), body(history)])).not.toMatch(
+          /outputStorageKey|outputDigest|storageKey|private person/,
+        );
+        const replay = await redact(scanId, key, token, {
+          columns: [{ sheetIndex: 0, column: 4, includeHeader: true }],
+        }).expect(202);
+        expect(body(replay).jobId).toBe(id);
+        await worker.tick();
+        expect(await files.countDocuments()).toBe(2);
+        expect(storage.putObject).toHaveBeenCalledTimes(1);
+        const usage = await app
+          .get<Model<object>>(getModelToken('company'))
+          .collection.findOne({ _id: tenant });
+        expect(usage?.syntheticUploads).toBe(1);
+        const lateBytes = Buffer.from(objects.get(output.storageKey)!);
+        await request(app.getHttpServer())
+          .delete(`/files/${outputId}`)
+          .auth(token, { type: 'bearer' })
+          .expect(200);
+        expect(objects.has(output.storageKey)).toBe(false);
+        expect(await files.findById(fileId)).not.toBeNull();
+        expect(
+          (await jobs.findById(id).select('+cleanupPending'))?.cleanupPending,
+        ).toBe(true);
+        objects.set(output.storageKey, lateBytes);
+        await jobs.updateOne(
+          { _id: id },
+          { $set: { cleanupAfter: new Date(0) } },
+        );
+        await worker.tick();
+        expect(objects.has(output.storageKey)).toBe(false);
+        expect(objects.get(sourceKey)?.equals(original)).toBe(true);
+      });
+      it('rejects sanitization unless both runtime approvals are present', async () => {
+        const runtime = app.get<GuardRuntimePolicy>(GUARD_RUNTIME_POLICY);
+        runtime.sanitizationApproved = false;
+        await redact(scanId).expect(503);
+        runtime.sanitizationApproved = true;
+        runtime.isolationApproved = false;
+        try {
+          await redact(scanId).expect(503);
+          await worker.tick();
+          expect(storage.putObject).not.toHaveBeenCalled();
+        } finally {
+          runtime.isolationApproved = true;
+        }
+        expect(await jobs.countDocuments({ kind: 'sanitize' })).toBe(0);
+      });
+      it('validates nested selections and rejects cross-tenant or other-requester scans', async () => {
+        await redact(scanId, crypto.randomUUID(), outsiderToken).expect(404);
+        await redact(scanId, crypto.randomUUID(), ownerToken).expect(404);
+        for (const invalid of [
+          { companyId: tenant.toString() },
+          { categories: [] },
+          { columns: [{ sheetIndex: 100, column: 1, includeHeader: true }] },
+          {
+            columns: [
+              {
+                sheetIndex: 0,
+                column: 1,
+                includeHeader: true,
+                value: 'private data',
+              },
+            ],
+          },
+          {
+            columns: [
+              { sheetIndex: 0, column: 1, includeHeader: true },
+              { sheetIndex: 0, column: 1, includeHeader: false },
+            ],
+          },
+        ]) {
+          const response = await redact(
+            scanId,
+            crypto.randomUUID(),
+            token,
+            invalid,
+          );
+          expect([400, 409]).toContain(response.status);
+        }
+        expect(await jobs.countDocuments({ kind: 'sanitize' })).toBe(0);
+      });
+      it('deduplicates concurrent UUIDs and rejects changed bodies or another active copy', async () => {
+        const key = crypto.randomUUID();
+        const results = await Promise.all([
+          redact(scanId, key),
+          redact(scanId, key),
+        ]);
+        expect(results.map((r) => r.status)).toEqual([202, 202]);
+        expect(body(results[0]).jobId).toBe(body(results[1]).jobId);
+        await redact(scanId, key, token, { categories: ['email'] }).expect(409);
+        await redact(scanId).expect(409);
+        await worker.tick();
+        expect(await files.countDocuments()).toBe(2);
+        expect(storage.putObject).toHaveBeenCalledTimes(1);
+      });
+      it('rejects changed source bytes and unsupported workbook profiles without putting output', async () => {
+        objects.set(sourceKey, Buffer.alloc(plainWorkbook().length));
+        const result = await runCopy();
+        expect(body(result.response)).toMatchObject({
+          status: 'failed',
+          errorCode: 'guard_source_changed',
+        });
+        expect(storage.putObject).not.toHaveBeenCalled();
+      });
+      it('handles quota denial after storage and keeps durable compensation without reserving quota', async () => {
+        quotaLimit = 1;
+        const result = await runCopy();
+        expect(body(result.response)).toMatchObject({
+          status: 'failed',
+          errorCode: 'guard_quota_exceeded',
+        });
+        expect(await files.countDocuments()).toBe(1);
+        expect(
+          (await jobs.findById(result.id).select('+cleanupPending'))
+            ?.cleanupPending,
+        ).toBe(true);
+        await worker.tick();
+        expect([...objects.keys()]).toEqual([sourceKey]);
+        expect(storage.deleteObject).toHaveBeenCalledTimes(1);
+      });
+      it('retains recovery records when PUT succeeds but its acknowledgement fails', async () => {
+        jest.spyOn(storage, 'putObject').mockImplementationOnce((input) => {
+          objects.set(input.key, Buffer.from(input.body));
+          return Promise.reject(new Error(CANARIES[0]));
+        });
+        const result = await runCopy();
+        expect(body(result.response)).toMatchObject({
+          status: 'failed',
+          errorCode: 'guard_internal_error',
+        });
+        expect(JSON.stringify(body(result.response))).not.toContain(
+          CANARIES[0],
+        );
+        expect(await files.countDocuments()).toBe(1);
+        await worker.tick();
+        expect([...objects.keys()]).toEqual([sourceKey]);
+      });
+      it('rolls back metadata and accounting if publication fails after file creation', async () => {
+        const svc = app.get(FilesService),
+          original = svc.publishGuardCopy.bind(svc);
+        jest
+          .spyOn(svc, 'publishGuardCopy')
+          .mockImplementationOnce(async (...args) => {
+            await original(...args);
+            throw new Error('synthetic publication failure');
+          });
+        const result = await runCopy();
+        expect(body(result.response).status).toBe('failed');
+        expect(await files.countDocuments()).toBe(1);
+        const company = await app
+          .get<Model<object>>(getModelToken('company'))
+          .collection.findOne({ _id: tenant });
+        expect(company?.syntheticUploads).toBe(0);
+        await worker.tick();
+        expect([...objects.keys()]).toEqual([sourceKey]);
+      });
+      it.each(['cancel', 'restrict', 'delete', 'company', 'user'])(
+        'cannot publish after %s during the storage write',
+        async (mode) => {
+          jest
+            .spyOn(storage, 'putObject')
+            .mockImplementationOnce(async (input) => {
+              objects.set(input.key, Buffer.from(input.body));
+              const active = (await jobs.findOne({
+                kind: 'sanitize',
+                active: true,
+              }))!;
+              if (mode === 'cancel')
+                await request(app.getHttpServer())
+                  .post(`/guard/jobs/${active._id.toString()}/cancel`)
+                  .auth(token, { type: 'bearer' })
+                  .send({})
+                  .expect(200);
+              if (mode === 'restrict')
+                await files.updateOne(
+                  { _id: fileId },
+                  { $set: { visibility: 'restricted', restrictedUserIds: [] } },
+                );
+              if (mode === 'delete') await files.deleteOne({ _id: fileId });
+              if (mode === 'company')
+                await app
+                  .get<Model<object>>(getModelToken('company'))
+                  .collection.updateOne(
+                    { _id: tenant },
+                    { $set: { platformStatus: 'suspended' } },
+                  );
+              if (mode === 'user')
+                await app
+                  .get<Model<object>>(getModelToken('user'))
+                  .collection.updateOne(
+                    { _id: member },
+                    { $set: { companyId: otherTenant } },
+                  );
+            });
+          const submitted = await redact(scanId).expect(202);
+          const id = body(submitted).jobId;
+          try {
+            await worker.tick();
+            expect(
+              await files.countDocuments({ derivation: { $exists: true } }),
+            ).toBe(0);
+            expect((await jobs.findById(id))?.status).not.toBe('completed');
+            await worker.tick();
+            expect([...objects.keys()]).toEqual([sourceKey]);
+          } finally {
+            await app
+              .get<Model<object>>(getModelToken('company'))
+              .collection.updateOne(
+                { _id: tenant },
+                { $set: { platformStatus: 'active' } },
+              );
+            await app
+              .get<Model<object>>(getModelToken('user'))
+              .collection.updateOne(
+                { _id: member },
+                { $set: { companyId: tenant } },
+              );
+          }
+        },
+      );
+      it('rejects a completed scan whose workbook contains formulas before writing storage', async () => {
+        objects.set(sourceKey, bytes);
+        await files.collection.updateOne(
+          { _id: new Types.ObjectId(fileId) },
+          { $set: { size: bytes.length } },
+        );
+        scanId = await submit();
+        await worker.tick();
+        const result = await runCopy();
+        expect(body(result.response)).toMatchObject({
+          status: 'failed',
+          errorCode: 'guard_profile_unsupported',
+        });
+        expect(storage.putObject).not.toHaveBeenCalled();
+      });
+      it('cancels queued copies without writing storage or recording upload usage', async () => {
+        const response = await redact(scanId).expect(202);
+        await request(app.getHttpServer())
+          .post(`/guard/jobs/${body(response).jobId}/cancel`)
+          .auth(token, { type: 'bearer' })
+          .send({})
+          .expect(200);
+        await worker.tick();
+        expect(storage.putObject).not.toHaveBeenCalled();
+        expect(entitlements.recordFileUploads).not.toHaveBeenCalled();
+      });
+      it('preserves an acknowledged database commit after the publication response is lost', async () => {
+        const response = await redact(scanId).expect(202),
+          id = body(response).jobId;
+        const connection = app.get<Connection>(getConnectionToken());
+        const original = connection.transaction.bind(connection);
+        let transactions = 0;
+        jest
+          .spyOn(connection, 'transaction')
+          .mockImplementation(async (fn, options) => {
+            const result = await original(fn, options);
+            transactions++;
+            if (transactions === 2)
+              throw new Error('synthetic lost commit acknowledgement');
+            return result;
+          });
+        await worker.tick();
+        const job = (await jobs.findById(id))!;
+        expect(job.status).toBe('completed');
+        expect(await files.countDocuments()).toBe(2);
+        await worker.tick();
+        expect(storage.deleteObject).not.toHaveBeenCalled();
+        expect(storage.putObject).toHaveBeenCalledTimes(1);
+      });
+      it('never stores or logs detected values and retries failed orphan cleanup durably', async () => {
+        const warn = jest.spyOn(Logger.prototype, 'warn'),
+          error = jest.spyOn(Logger.prototype, 'error');
+        quotaLimit = 1;
+        const result = await runCopy();
+        jest
+          .spyOn(storage, 'deleteObject')
+          .mockRejectedValueOnce(new Error(CANARIES[0]));
+        await worker.tick();
+        expect(
+          (await jobs.findById(result.id).select('+cleanupPending'))
+            ?.cleanupPending,
+        ).toBe(true);
+        await jobs.updateOne(
+          { _id: result.id },
+          { $set: { cleanupAfter: new Date(0) } },
+        );
+        await worker.tick();
+        expect([...objects.keys()]).toEqual([sourceKey]);
+        const recorded = JSON.stringify({
+          jobs: await jobs
+            .find()
+            .select(
+              '+fingerprint +sourceDigest +outputStorageKey +outputDigest',
+            )
+            .lean(),
+          findings: await findings.find().lean(),
+          logs: [warn.mock.calls, error.mock.calls],
+          response: body(result.response),
+        });
+        for (const raw of [...CANARIES, 'private person', 'private bank'])
+          expect(recorded).not.toContain(raw);
+      });
+      it('checks lineage for metadata, listing and downloads while preserving derived deletion rights', async () => {
+        const copy = await runCopy();
+        expect(body(copy.response).status).toBe('completed');
+        await request(app.getHttpServer())
+          .get(`/files/${copy.fileId}/download`)
+          .auth(outsiderToken, { type: 'bearer' })
+          .expect(404);
+        await request(app.getHttpServer())
+          .patch(`/files/${copy.fileId}/permissions`)
+          .auth(token, { type: 'bearer' })
+          .send({ visibility: 'company_wide' })
+          .expect(403);
+        await files.updateOne(
+          { _id: fileId },
+          { $set: { visibility: 'restricted', restrictedUserIds: [] } },
+        );
+        await request(app.getHttpServer())
+          .get(`/files/${copy.fileId}`)
+          .auth(token, { type: 'bearer' })
+          .expect(404);
+        await request(app.getHttpServer())
+          .get(`/files/${copy.fileId}/download`)
+          .auth(token, { type: 'bearer' })
+          .expect(404);
+        const listed = await request(app.getHttpServer())
+          .get('/files?page=1&take=30')
+          .auth(token, { type: 'bearer' })
+          .expect(200);
+        expect(JSON.stringify(listed.body)).not.toContain(copy.fileId);
+        await request(app.getHttpServer())
+          .delete(`/files/${copy.fileId}`)
+          .auth(token, { type: 'bearer' })
+          .expect(200);
+      });
+      it('recovers an expired sanitization lease with the same output identity and charges once', async () => {
+        const submitted = await redact(scanId).expect(202),
+          id = body(submitted).jobId;
+        const initial = (await jobs.findById(id).select('+outputStorageKey'))!;
+        await jobs.updateOne(
+          { _id: id },
+          {
+            $set: {
+              status: 'processing',
+              attempts: 1,
+              leaseToken: 'crashed',
+              leaseExpiresAt: new Date(0),
+              cleanupPending: true,
+            },
+          },
+        );
+        objects.set(
+          initial.outputStorageKey!,
+          Buffer.from('uncertain temporary object'),
+        );
+        await worker.tick();
+        const recovered = (await jobs
+          .findById(id)
+          .select('+outputStorageKey'))!;
+        expect(recovered.status).toBe('completed');
+        expect(recovered.outputStorageKey).toBe(initial.outputStorageKey);
+        expect(recovered.resultFileId?.equals(initial.resultFileId)).toBe(true);
+        expect(await files.countDocuments()).toBe(2);
+        expect(storage.putObject).toHaveBeenCalledTimes(1);
+      });
     });
   },
 );

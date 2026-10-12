@@ -2,6 +2,12 @@
 
 **Status: architecture proposal; later implementation phases require separate review.**
 The gated, scan-only Phase 1 backend is now documented in [the implementation guide](sensitive-data-guard-phase1.md). The audit and future-phase proposals below describe their original review baseline; they are not a claim that every proposed capability is implemented.
+The gated [Phase 2 backend foundation](sensitive-data-guard-phase2.md) now implements
+full-cell redaction for a strict plain OOXML subset, derived publication and durable
+reconciliation. Default admission/processing/sanitization remain disabled. General
+Excel fidelity, frontend integration and public activation are not implemented.
+The implementation guide supersedes proposed library/budget/API details for Phase 2.
+
 Reviewed on 2026-10-11 against clean `main`, commit `847a8c1`. All new APIs,
 models, limits, modules and behaviors below are proposals requiring review.
 No dependencies, environment variables, secrets, source code or deployments are

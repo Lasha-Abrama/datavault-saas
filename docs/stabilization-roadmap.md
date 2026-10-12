@@ -402,3 +402,35 @@ Guard replica-set cases. Documentation validation passed 31 Markdown files and
 resolved before the final successful runs. Ready for review and an authorized
 push with the default safety policy unchanged; this does not approve activation
 or establish live Render/provider health.
+
+## Guard Phase 2 — default-off sanitization foundation (2026-10-11)
+
+Implemented a backend-only [full-cell-redaction foundation](sensitive-data-guard-phase2.md)
+on `645e37e`. The compiled child checks a strict plain OOXML profile, reconstructs
+literal cells/hidden areas, removes metadata/shared-string leftovers, writes only
+`[REDACTED]` to selected targets and reopens/verifies output. Styled workbooks,
+formulas, merges, comments/links/drawings/pivots/validation and other unsupported
+structures are rejected. This does not certify complete sensitive-data removal.
+
+Shared durable Guard jobs support copy UUID recovery, independent default-false
+sanitization approval, existing status/cancellation and scoped copy history. New
+private file records carry immutable derivation metadata and current source-lineage
+authorization. Existing quota/upload usage records commit atomically with the copy
+and completed job; no quota reservations are introduced. Durable fixed output
+identities and cleanup tombstones handle stale storage/DB outcomes without deleting
+committed copies or touching originals. No frontend, dependency, billing-policy,
+environment, secret, activation, commit, push or deployment changes were made.
+
+Public activation remains blocked by production isolation, retention/object-version
+quiescence, repeated cleanup monitoring/cost, load/corpus validation and an exact
+lineage-aware ordinary file-list/count query. Disabled deployment retains the prior
+startup safety: no Guard index initialization, polling, content reads or children.
+
+Final local verification (2026-10-12): build, lint, formatting and whitespace checks
+passed; backend units **61 suites/752 tests** and HTTP **10 suites/182 tests** passed,
+including 35 Guard replica-set cases and the compiled production default-off startup
+smoke. An independent `openpyxl` reopen verified seven literal redactions, hidden
+content visibility, unchanged source bytes and selected-canary removal from all
+generated ZIP parts. Documentation validation checked 32 Markdown files and 232
+local links/anchors. Ready for local review and an authorized push with both approval
+gates unchanged; no push was performed and activation/live providers remain unverified.

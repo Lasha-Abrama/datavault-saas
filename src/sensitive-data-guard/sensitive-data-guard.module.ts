@@ -1,3 +1,5 @@
+import { AwsS3Module } from '../aws-s3/aws-s3.module';
+import { GuardSanitizationService } from './guard-sanitization.service';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
@@ -20,6 +22,7 @@ import {
   imports: [
     AuthModule,
     FilesModule,
+    AwsS3Module,
     MongooseModule.forFeature([
       { name: 'guardJob', schema: guardJobSchema },
       { name: 'guardFinding', schema: guardFindingSchema },
@@ -29,6 +32,7 @@ import {
   controllers: [GuardController],
   providers: [
     GuardService,
+    GuardSanitizationService,
     GuardAccessService,
     GuardRunner,
     GuardWorker,

@@ -69,3 +69,12 @@ export function workbookParts(): Record<string, string> {
 export function workbook() {
   return archive(workbookParts());
 }
+
+export function plainWorkbook() {
+  const parts = workbookParts();
+  parts['xl/worksheets/sheet1.xml'] = parts['xl/worksheets/sheet1.xml'].replace(
+    '<c r="C2"><f>1+1</f><v>2</v></c>',
+    '',
+  );
+  return archive(parts);
+}

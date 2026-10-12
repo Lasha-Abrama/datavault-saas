@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   Category,
   CATEGORIES,
@@ -11,6 +12,8 @@ import {
   SAFE_ERRORS,
   ScanError,
   ScanResult,
+  SanitizationOptions,
+  SanitizationResult,
 } from './guard.constants';
 @Injectable()
 export class GuardRunner {
@@ -21,6 +24,33 @@ export class GuardRunner {
     phoneRegion: string | undefined,
     signal: AbortSignal,
   ): Promise<ScanResult> {
+    const result = await this.execute(bytes, categories, phoneRegion, signal);
+    if (!('findings' in result)) throw new ScanError('guard_invalid_workbook');
+    return result;
+  }
+  async sanitize(
+    bytes: Buffer,
+    options: SanitizationOptions,
+    signal: AbortSignal,
+  ): Promise<SanitizationResult> {
+    const result = await this.execute(
+      bytes,
+      options.categories,
+      options.phoneRegion,
+      signal,
+      options,
+    );
+    if (!('bytes' in result))
+      throw new ScanError('guard_output_verification_failed');
+    return result;
+  }
+  private async execute(
+    bytes: Buffer,
+    categories: Category[],
+    phoneRegion: string | undefined,
+    signal: AbortSignal,
+    sanitization?: SanitizationOptions,
+  ): Promise<ScanResult | SanitizationResult> {
     // Development also needs a compiled child; never run an untrusted parser in API JS.
     const directory = resolve(
       __dirname.endsWith('/dist/sensitive-data-guard')
@@ -48,7 +78,10 @@ export class GuardRunner {
       let length = 0,
         settled = false;
       const chunks: Buffer[] = [];
-      const finish = (error?: ScanError, result?: ScanResult) => {
+      const finish = (
+        error?: ScanError,
+        result?: ScanResult | SanitizationResult,
+      ) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
@@ -71,7 +104,12 @@ export class GuardRunner {
       );
       child.stdout.on('data', (chunk: Buffer) => {
         length += chunk.length;
-        if (length > 2 * 1024 * 1024)
+        if (
+          length >
+          (sanitization
+            ? Math.ceil((this.limits.compressedBytes * 4) / 3) + 4096
+            : 2 * 1024 * 1024)
+        )
           finish(new ScanError('guard_limit_exceeded'));
         else chunks.push(chunk);
       });
@@ -82,7 +120,15 @@ export class GuardRunner {
         try {
           const response = JSON.parse(
             Buffer.concat(chunks).toString('utf8'),
-          ) as { errorCode?: string; result?: ScanResult };
+          ) as {
+            errorCode?: string;
+            result?: ScanResult;
+            sanitization?: {
+              outputBase64: string;
+              redactedCells: number;
+              outputDigest: string;
+            };
+          };
           if (response.errorCode)
             return finish(
               new ScanError(
@@ -91,6 +137,31 @@ export class GuardRunner {
                   : 'guard_invalid_workbook',
               ),
             );
+          if (sanitization) {
+            const generated = response.sanitization;
+            if (
+              !generated ||
+              typeof generated.outputBase64 !== 'string' ||
+              !/^[A-Za-z0-9+/]*={0,2}$/.test(generated.outputBase64)
+            )
+              throw new Error();
+            const output = Buffer.from(generated.outputBase64, 'base64');
+            if (
+              !output.length ||
+              output.length > this.limits.compressedBytes ||
+              !Number.isInteger(generated.redactedCells) ||
+              generated.redactedCells < 1 ||
+              generated.redactedCells > this.limits.cells ||
+              createHash('sha256').update(output).digest('hex') !==
+                generated.outputDigest
+            )
+              throw new Error();
+            return finish(undefined, {
+              bytes: output,
+              redactedCells: generated.redactedCells,
+              outputDigest: generated.outputDigest,
+            });
+          }
           if (
             !response.result ||
             response.result.findings.length > this.limits.findings
@@ -149,8 +220,12 @@ export class GuardRunner {
       child.stdin.end(
         Buffer.concat([
           Buffer.from(
-            JSON.stringify({ categories, phoneRegion, limits: this.limits }) +
-              '\n',
+            JSON.stringify({
+              categories,
+              phoneRegion,
+              limits: this.limits,
+              sanitization,
+            }) + '\n',
           ),
           bytes,
         ]),

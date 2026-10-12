@@ -184,7 +184,7 @@ export class GuardService {
     query: GuardQueryDto,
   ) {
     const job = await this.authorized(actor, id);
-    if (job.status !== 'completed')
+    if (job.kind === 'sanitize' || job.status !== 'completed')
       throw new ConflictException('guard_scan_not_completed');
     const results = await this.findings
       .find({
@@ -256,6 +256,16 @@ export class GuardService {
   publicJob(job: JobDocument) {
     return {
       jobId: job._id.toString(),
+      kind: job.kind ?? 'scan',
+      ...(job.kind === 'sanitize'
+        ? {
+            scanId: job.scanId?.toString(),
+            resultFileId:
+              job.status === 'completed' ? job.resultFileId?.toString() : null,
+            redactedCells: job.redactedCells,
+            transformationScope: 'selected_supported_cells',
+          }
+        : {}),
       sourceFileId: job.sourceFileId.toString(),
       requestKey: job.requestKey,
       status: job.status,

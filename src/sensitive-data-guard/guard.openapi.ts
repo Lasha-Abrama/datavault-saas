@@ -3,6 +3,11 @@ import { CATEGORIES, STATES } from './guard.constants';
 export const jobSchema: SchemaObject = {
   type: 'object',
   properties: {
+    kind: { type: 'string', enum: ['scan', 'sanitize'] },
+    scanId: { type: 'string', nullable: true },
+    resultFileId: { type: 'string', nullable: true },
+    redactedCells: { type: 'integer', minimum: 0 },
+    transformationScope: { type: 'string', enum: ['selected_supported_cells'] },
     jobId: { type: 'string' },
     sourceFileId: { type: 'string' },
     requestKey: { type: 'string', format: 'uuid' },
