@@ -3,6 +3,8 @@ import { Test } from '@nestjs/testing';
 import { GuardWorker } from './guard.worker';
 import { GuardService } from './guard.service';
 import { GuardRunner } from './guard.runner';
+import { GuardSanitizationService } from './guard-sanitization.service';
+import { ObjectStorage } from '../aws-s3/object-storage';
 import { FilesService } from '../files/files.service';
 import {
   DEFAULT_LIMITS,
@@ -40,13 +42,15 @@ describe('Guard startup safety', () => {
       events: persistence(),
     };
     const files = { download: jest.fn() };
-    const runner = { run: jest.fn() };
+    const runner = { run: jest.fn(), sanitize: jest.fn() };
+    const sanitization = { cleanup: jest.fn(), process: jest.fn() };
     const module = await Test.createTestingModule({
       providers: [
         GuardWorker,
         { provide: GuardService, useValue: service },
         { provide: FilesService, useValue: files },
         { provide: GuardRunner, useValue: runner },
+        { provide: GuardSanitizationService, useValue: sanitization },
         {
           provide: ConfigService,
           useValue: new ConfigService({ NODE_ENV: 'production' }),
@@ -68,6 +72,72 @@ describe('Guard startup safety', () => {
     }
     expect(files.download).not.toHaveBeenCalled();
     expect(runner.run).not.toHaveBeenCalled();
+    expect(runner.sanitize).not.toHaveBeenCalled();
+    expect(sanitization.cleanup).not.toHaveBeenCalled();
+    expect(sanitization.process).not.toHaveBeenCalled();
+    expect(DEFAULT_RUNTIME_POLICY).toEqual({
+      isolationApproved: false,
+      sanitizationApproved: false,
+    });
+    expect(Object.isFrozen(DEFAULT_RUNTIME_POLICY)).toBe(true);
+  });
+
+  it.each([
+    DEFAULT_RUNTIME_POLICY,
+    { isolationApproved: false, sanitizationApproved: true },
+    { isolationApproved: true, sanitizationApproved: false },
+  ])(
+    'does no reconciliation when either approval is absent: %j',
+    async (runtime) => {
+      const jobs = { find: jest.fn() };
+      const storage = { deleteObject: jest.fn() };
+      const service = new GuardSanitizationService(
+        { jobs } as unknown as GuardService,
+        {} as FilesService,
+        storage as unknown as ObjectStorage,
+        {} as GuardRunner,
+        runtime,
+        DEFAULT_LIMITS,
+      );
+      await service.cleanup();
+      expect(jobs.find).not.toHaveBeenCalled();
+      expect(storage.deleteObject).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses cleanup of an original or unrelated storage key', async () => {
+    const job = {
+      _id: 'aaaaaaaaaaaaaaaaaaaaaaaa',
+      companyId: 'bbbbbbbbbbbbbbbbbbbbbbbb',
+      resultFileId: 'cccccccccccccccccccccccc',
+      outputStorageKey:
+        'companies/bbbbbbbbbbbbbbbbbbbbbbbb/files/original.xlsx',
+    };
+    const query = {
+      select: jest.fn().mockReturnThis(),
+      sort: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue([job]),
+    };
+    const jobs = {
+      find: jest.fn().mockReturnValue(query),
+      updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+    };
+    const files = { guardCopyExists: jest.fn().mockResolvedValue(null) };
+    const storage = { deleteObject: jest.fn() };
+    const service = new GuardSanitizationService(
+      { jobs } as unknown as GuardService,
+      files as unknown as FilesService,
+      storage as unknown as ObjectStorage,
+      {} as GuardRunner,
+      { isolationApproved: true, sanitizationApproved: true },
+      DEFAULT_LIMITS,
+    );
+    await service.cleanup();
+    expect(files.guardCopyExists).toHaveBeenCalledWith(
+      job.companyId,
+      job.resultFileId,
+    );
+    expect(storage.deleteObject).not.toHaveBeenCalled();
   });
 
   it('fails closed before polling when approved-runtime index initialization fails', async () => {

@@ -296,3 +296,44 @@ environment files or production configuration are changed.
 These checks establish local default-off review readiness, not live Render/S3
 health or production worker isolation. Live providers and production infrastructure
 were not accessed. The activation blockers above remain unresolved.
+
+## Disabled deployment safety review — 2026-10-12
+
+Reviewed committed Phase 2 revision `92f5356` against Phase 1 `645e37e`.
+No runtime safety defect or application-code fix was identified. Added regression
+assertions and this review record; both approval providers remain frozen false.
+
+| Check                    | Result                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admission                | Scan admission requires isolation approval; copy admission requires both approvals. Valid authorized requests return 503 with defaults and create no job, object or quota entry. Environment variables cannot turn either provider on.                                                                                                                                              |
+| Startup and worker       | Default bootstrap/tick return before collection/index creation, timers, recovery, cleanup, storage reads/writes or child processing. Direct cleanup also returns before querying jobs when either approval is absent.                                                                                                                                                               |
+| Original file operations | Upload validation, visibility/RBAC, quota accounting, compensation, downloads and deletion remain unchanged. Lineage checks return immediately for files without derivation metadata and perform no additional database reads. Ordinary S3 uploads retain their original SDK invocation when no abort signal is supplied.                                                           |
+| Historical metadata      | Status, findings, job history and copy history remain tenant/requester/source scoped. Disabled admission does not erase history or prohibit authorized metadata cancellation; these do not run workbook processing or storage reconciliation.                                                                                                                                       |
+| Database                 | Guard schemas keep `autoCreate: false` and `autoIndex: false`, including when the existing global readiness service calls `model.init()`. The new cleanup index is additive and initialized only by an approved worker. Optional file derivation is a subdocument, not a new collection/model; existing file indexes are unchanged. No backfill or destructive migration is needed. |
+| Cleanup key scope        | Reconciliation requires an inactive sanitization job, majority-confirmed absence of output metadata and an exact server-generated tenant/job key. Original/unrelated keys are refused. Disabled defaults make no reconciliation queries or DELETE requests.                                                                                                                         |
+| Deployment               | Existing Node 24 build/start commands, private storage and MongoDB replica-set prerequisites suffice. No new dependency, secret, infrastructure or environment variable is required. No checked-in Render Blueprint exists; dashboard overrides and live infrastructure were not inspected.                                                                                         |
+
+The compiled production smoke now fails on any attempted Guard recovery, cleanup,
+storage mutation, parser loading or child processing. Unit checks cover both false
+defaults, direct reconciliation with either approval absent and refusal of an
+original-file cleanup key. No application behavior or production configuration
+was changed by this review.
+
+Original-file compatibility does not mean historical derived files behave like
+ordinary uploads: they retain source-lineage checks and restricted sharing even
+while Guard is disabled. Inaccessible derived rows can still yield sparse ordinary
+listing pages/overstated totals. Also, disabled cleanup will not drain previously
+pending output objects. These documented activation/drain limitations require
+separate operational work before enabling or retiring an active worker.
+
+Dependency manifests/lockfiles are unchanged from Phase 1, so a dependency audit
+was not rerun for this review. Live Render/S3 checks and production isolation were
+not performed. Safe disabled deployment does not authorize activation.
+
+Final review checks passed: build, lint, backend/changed-Markdown formatting and
+whitespace validation; **61 unit suites/756 tests** and **10 HTTP suites/182 tests**,
+including 35 Guard cases and the strengthened compiled production startup smoke.
+Only `src/sensitive-data-guard/guard.worker.spec.ts`, `test/guard.e2e-spec.ts`, this
+guide and `docs/stabilization-roadmap.md` changed during the review. Ready for local
+review and an authorized push with both gates disabled; no commit/push/deployment
+was performed.

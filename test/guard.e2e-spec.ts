@@ -319,9 +319,13 @@ const available =
         require('node:child_process').spawn = () => { throw new Error('unexpected_child'); };
         require(${JSON.stringify(join(guardDirectory, 'guard.runner.js'))}).GuardRunner.prototype.run = () => { throw new Error('unexpected_scan'); };
         require(${JSON.stringify(join(guardDirectory, 'guard.runner.js'))}).GuardRunner.prototype.sanitize = () => { throw new Error('unexpected_sanitize'); };
+        require(${JSON.stringify(join(guardDirectory, 'guard-sanitization.service.js'))}).GuardSanitizationService.prototype.cleanup = () => { throw new Error('unexpected_cleanup'); };
+        require(${JSON.stringify(join(guardDirectory, 'guard.worker.js'))}).GuardWorker.prototype.recover = () => { throw new Error('unexpected_recovery'); };
+        const storage = require(${JSON.stringify(resolve(__dirname, '../dist/aws-s3/aws-s3.service.js'))}).AwsS3Service.prototype;
+        storage.putObject = storage.deleteObject = () => { throw new Error('unexpected_storage_write'); };
         require(${JSON.stringify(resolve(__dirname, '../dist/files/files.service.js'))}).FilesService.prototype.download = () => { throw new Error('unexpected_content_read'); };
         require(${JSON.stringify(entry)});
-        if (Object.keys(require.cache).some(p => /(?:scan-child|scan-workbook)\\.js$/.test(p))) throw new Error('unexpected_parser_load');
+        if (Object.keys(require.cache).some(p => /(?:scan-child|scan-workbook|sanitize-workbook|write-xlsx)\\.js$/.test(p))) throw new Error('unexpected_parser_load');
       `;
       const process = spawn(global.process.execPath, ['-e', script], {
         // A temporary working directory prevents dotenv from reading the repository's .env.
@@ -442,7 +446,7 @@ const available =
           ),
         ).toEqual(['_id_']);
         expect(output).not.toMatch(
-          /unexpected_child|unexpected_scan|unexpected_sanitize|unexpected_content_read|unexpected_parser_load|Guard worker unavailable/,
+          /unexpected_child|unexpected_scan|unexpected_sanitize|unexpected_cleanup|unexpected_recovery|unexpected_storage_write|unexpected_content_read|unexpected_parser_load|Guard worker unavailable/,
         );
         expect(
           (await fetch(`${origin}/guard/jobs/${sentinel._id.toString()}`))
